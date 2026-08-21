@@ -1,13 +1,19 @@
 name: Publish to PyPI
 
-# Triggers when you push a version tag like v0.1.1
+# Silent releases: every push to main builds and publishes a new version.
+# No tags, no manual version bump — the patch number is the CI run number.
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+  workflow_dispatch: {}  # allow manual runs from the Actions tab too
 
 permissions:
   contents: read
+
+# If you push twice quickly, cancel the older in-flight run.
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 jobs:
   pypi-publish:
@@ -22,17 +28,18 @@ jobs:
         with:
           python-version: "3.x"
 
-      # Safety: refuse to publish if the pushed tag doesn't match the version
-      # declared in pyproject.toml (prevents accidental mismatched releases).
-      - name: Verify tag matches pyproject version
+      # Version = <major.minor from pyproject> . <CI run number>
+      # e.g. pyproject says 0.1.0 and this is run #7  ->  0.1.7
+      # Bump the major/minor in pyproject.toml whenever you want (0.2.x, 1.0.x);
+      # the patch is always automatic and strictly increasing, so PyPI never
+      # rejects a duplicate.
+      - name: Compute silent version
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          VER="$(grep -E '^version' pyproject.toml | head -1 | sed -E 's/.*"(.*)".*/\1/')"
-          echo "git tag = $TAG   pyproject.toml = $VER"
-          if [ "$TAG" != "$VER" ]; then
-            echo "::error::Tag v$TAG does not match pyproject version $VER. Bump the version first."
-            exit 1
-          fi
+          BASE="$(grep -E '^version' pyproject.toml | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+).*"/\1/')"
+          VERSION="${BASE}.${{ github.run_number }}"
+          echo "Publishing version: $VERSION"
+          sed -i -E "s/^version = \".*\"/version = \"${VERSION}\"/" pyproject.toml
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Build sdist + wheel
         run: |
@@ -41,3 +48,6 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Summary
+        run: echo "Published learnlance $VERSION to PyPI 🎉" >> "$GITHUB_STEP_SUMMARY"
