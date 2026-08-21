@@ -226,7 +226,12 @@ def _cmd_worker(args):
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="learnlance",
         description="Turn what Claude Code builds into a growing knowledge graph.")
-    sub = p.add_subparsers(dest="cmd")
+    # metavar lists only the user-facing commands; internal ones (hook,
+    # _worker) are added below without help= so they stay out of the listing.
+    sub = p.add_subparsers(
+        dest="cmd",
+        metavar="{install,uninstall,config,show,list,stats,clear,add,help}",
+    )
 
     sub.add_parser("install", help="install the Claude Code Stop hook").set_defaults(func=_cmd_install)
     sub.add_parser("uninstall", help="remove the Stop hook").set_defaults(func=_cmd_uninstall)
@@ -271,9 +276,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("help", help="show this help message").set_defaults(func=_cmd_help)
 
-    h = sub.add_parser("hook", help="(internal) Stop-hook entry point")
+    # Internal commands — no help= so they're omitted from the help listing.
+    h = sub.add_parser("hook")
     h.set_defaults(func=_cmd_hook)
-    w = sub.add_parser("_worker", help=argparse.SUPPRESS)
+    w = sub.add_parser("_worker")
     w.add_argument("job")
     w.set_defaults(func=_cmd_worker)
 

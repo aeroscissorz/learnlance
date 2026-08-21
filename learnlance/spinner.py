@@ -39,9 +39,11 @@ class Spinner:
         print(result)   # spinner line already cleared
     """
 
-    def __init__(self, label: str = "loading", stream=None):
+    def __init__(self, label: str = "loading", stream=None, min_duration: float = 0.4):
         self.label = label
         self.stream = stream or sys.stdout
+        self.min_duration = min_duration  # floor so fast tasks still flash it
+        self._start = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         # Only animate for interactive terminals; otherwise stay quiet-ish.
@@ -58,6 +60,7 @@ class Spinner:
             time.sleep(_INTERVAL)
 
     def __enter__(self) -> "Spinner":
+        self._start = time.monotonic()
         if self._tty:
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
@@ -68,10 +71,16 @@ class Spinner:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        # Keep the animation up for a brief floor so quick tasks still show it.
+        if self._tty and self._thread is not None:
+            remaining = self.min_duration - (time.monotonic() - self._start)
+            if remaining > 0:
+                time.sleep(remaining)
         self._stop.set()
         if self._thread is not None:
             self._thread.join()
         if self._tty:
-            # Erase the spinner line entirely so it "disappears".
-            self.stream.write("\r\033[K")
+            # Erase the spinner line by overwriting with spaces (portable —
+            # avoids ANSI escapes that some Windows consoles don't handle).
+            self.stream.write("\r" + " " * (len(self.label) + 6) + "\r")
             self.stream.flush()
