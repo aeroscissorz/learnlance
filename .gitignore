@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# learnlance local runtime data / test homes
+.learnlance/
+.testhome*/
+.testconn/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

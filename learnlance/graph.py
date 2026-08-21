@@ -1,0 +1,208 @@
+"""Persistent knowledge graph. Nodes = concepts you've encountered, edges =
+relationships between them. Stored as a single JSON file so it's easy to inspect,
+back up, or version.
+
+Connectivity model — how the graph stays "one connected web" instead of islands:
+  * related    : the model names adjacent/umbrella concepts for each topic. If a
+                 related concept isn't a node yet we add a light placeholder;
+                 when you later actually learn it, the placeholder is upgraded in
+                 place, so separately-learned clusters fuse at that shared node.
+  * co-occurs  : concepts learned in the same turn are linked.
+  * shared-tag : every concept carries tags; a new concept links to EXISTING
+                 concepts (from any past session) that share a tag. This is what
+                 connects the graph globally, based on relatedness.
+Each unordered pair has exactly one edge, whose `type` is the strongest relation
+seen and whose `weight` grows each time the relationship is reinforced.
+"""
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+from . import config
+
+# Stronger relation wins the edge's displayed type; weight still accumulates.
+_PRIORITY = {"co-occurs": 3, "related": 2, "shared-tag": 1}
+# Cap how many existing same-tag neighbours a new concept links to per tag,
+# so a popular tag doesn't turn the graph into a hairball.
+_MAX_TAG_NEIGHBOURS = 3
+
+
+def slug(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return s or "unknown"
+
+
+def _norm_tag(tag: str) -> str:
+    return slug(tag)
+
+
+def load(path: Path | None = None) -> dict:
+    path = path or config.GRAPH_PATH
+    if path.exists():
+        try:
+            g = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            g = {}
+    else:
+        g = {}
+    g.setdefault("nodes", {})
+    g.setdefault("edges", [])
+    g.setdefault("sessions", {})
+    g.setdefault("tag_index", {})
+    g.setdefault("meta", {"turns": 0})
+    return g
+
+
+def save(graph: dict, path: Path | None = None) -> None:
+    path = path or config.GRAPH_PATH
+    config.ensure_home()
+    path.write_text(json.dumps(graph, indent=2), encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# edges
+# --------------------------------------------------------------------------- #
+def _pair_key(a: str, b: str) -> str:
+    return "::".join(sorted((a, b)))
+
+
+def _find_edge(graph: dict, a: str, b: str) -> dict | None:
+    key = _pair_key(a, b)
+    for e in graph["edges"]:
+        if _pair_key(e["source"], e["target"]) == key:
+            return e
+    return None
+
+
+def _link(graph: dict, a: str, b: str, etype: str, tag: str | None = None) -> None:
+    if a == b or a not in graph["nodes"] or b not in graph["nodes"]:
+        return
+    e = _find_edge(graph, a, b)
+    if e is None:
+        graph["edges"].append({
+            "source": a, "target": b, "type": etype, "weight": 1,
+            "tags": ([tag] if tag else []),
+        })
+        return
+    e["weight"] = e.get("weight", 1) + 1
+    if _PRIORITY.get(etype, 0) > _PRIORITY.get(e.get("type", "related"), 0):
+        e["type"] = etype
+    if tag and tag not in e.setdefault("tags", []):
+        e["tags"].append(tag)
+
+
+# --------------------------------------------------------------------------- #
+# nodes / tags
+# --------------------------------------------------------------------------- #
+def _placeholder(nid: str, name: str, when: str) -> dict:
+    return {
+        "id": nid, "name": name, "category": "other", "level": "",
+        "explanation": "", "count": 0, "first_seen": when, "last_seen": when,
+        "examples": [], "tags": [], "placeholder": True,
+    }
+
+
+def _register_tags(graph: dict, nid: str, tags: list[str]) -> list[str]:
+    """Add node to the tag index; return the normalized tags."""
+    norm = []
+    for t in tags:
+        nt = _norm_tag(t)
+        if not nt:
+            continue
+        norm.append(nt)
+        bucket = graph["tag_index"].setdefault(nt, [])
+        if nid not in bucket:
+            bucket.append(nid)
+    return norm
+
+
+def update(graph: dict, insights: dict, context: dict) -> list[str]:
+    """Merge one turn's insights into the graph. Returns names of NEW topics."""
+    when = context.get("when", "")
+    session = context.get("session", "")
+    cwd = context.get("cwd", "")
+    files = context.get("files", [])
+    did = insights.get("did", "")
+
+    graph["meta"]["turns"] = graph.get("meta", {}).get("turns", 0) + 1
+
+    new_names: list[str] = []
+    touched_ids: list[str] = []
+
+    for t in insights.get("topics", []):
+        name = (t.get("name") or "").strip()
+        if not name:
+            continue
+        nid = slug(name)
+        node = graph["nodes"].get(nid)
+        was_placeholder = bool(node and node.get("placeholder"))
+        if node is None or was_placeholder:
+            if node is None:
+                new_names.append(name)
+                node = _placeholder(nid, name, when)
+                graph["nodes"][nid] = node
+            # Upgrade placeholder -> real concept (fuses clusters at this node).
+            node["placeholder"] = False
+            node["category"] = t.get("category", node.get("category", "other"))
+            node["level"] = t.get("level", node.get("level", ""))
+
+        node["count"] += 1
+        node["last_seen"] = when
+        if len(t.get("explanation", "")) > len(node.get("explanation", "")):
+            node["explanation"] = t.get("explanation", "")
+
+        # tags: union over time, and index for cross-session linking
+        incoming = _register_tags(graph, nid, t.get("tags", []) or [])
+        node_tags = node.setdefault("tags", [])
+        for nt in incoming:
+            if nt not in node_tags:
+                node_tags.append(nt)
+
+        node["examples"] = (node.get("examples", []) + [{
+            "did": did, "why_here": t.get("why_here", ""),
+            "files": files, "when": when, "session": session,
+        }])[-8:]
+
+        touched_ids.append(nid)
+
+        # 1) explicit related concepts (create light placeholders as needed)
+        for rel in t.get("related", []) or []:
+            rname = (rel or "").strip()
+            if not rname:
+                continue
+            rid = slug(rname)
+            if rid not in graph["nodes"]:
+                graph["nodes"][rid] = _placeholder(rid, rname, when)
+            _link(graph, nid, rid, "related")
+
+        # 2) shared-tag links to EXISTING concepts across all past sessions
+        linked_this_node: set[str] = set()
+        for nt in incoming:
+            bucket = graph["tag_index"].get(nt, [])
+            # prefer the most-reinforced existing real neighbours
+            neighbours = [
+                b for b in bucket
+                if b != nid and not graph["nodes"].get(b, {}).get("placeholder")
+            ]
+            neighbours.sort(key=lambda b: -graph["nodes"].get(b, {}).get("count", 0))
+            for b in neighbours[:_MAX_TAG_NEIGHBOURS]:
+                if b in linked_this_node:
+                    continue
+                linked_this_node.add(b)
+                _link(graph, nid, b, "shared-tag", tag=nt)
+
+    # 3) concepts learned together this turn
+    for i in range(len(touched_ids)):
+        for j in range(i + 1, len(touched_ids)):
+            _link(graph, touched_ids[i], touched_ids[j], "co-occurs")
+
+    if session:
+        s = graph["sessions"].setdefault(session, {"cwd": cwd, "topics": [], "first": when})
+        s["last"] = when
+        for nid in touched_ids:
+            if nid not in s["topics"]:
+                s["topics"].append(nid)
+
+    return new_names
