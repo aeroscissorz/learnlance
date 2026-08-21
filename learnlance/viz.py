@@ -37,6 +37,11 @@ _TEMPLATE = r"""<!doctype html>
   .stat span{color:var(--muted);font-size:11px}
   input[type=search]{width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--line);
     background:var(--panel2);color:var(--fg);margin-bottom:12px;font-size:13px}
+  .controls{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;margin-bottom:14px;display:flex;flex-direction:column;gap:8px}
+  .controls label{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px}
+  .controls input[type=range]{flex:1;accent-color:var(--accent)}
+  .controls .val{color:var(--fg);min-width:12px;text-align:right}
   .legend{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
   .legend span{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px}
   .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
@@ -71,6 +76,13 @@ _TEMPLATE = r"""<!doctype html>
       <div><b id="s-turns">0</b><span>TURNS</span></div>
     </div>
     <input type="search" id="q" placeholder="Search concepts…" autocomplete="off">
+    <div class="controls">
+      <label><input type="checkbox" id="showRelated"> show related concepts (dimmed)</label>
+      <label>min link strength
+        <input type="range" id="minW" min="1" max="6" step="1" value="1">
+        <span class="val" id="minWv">1</span>
+      </label>
+    </div>
     <div class="legend" id="legend"></div>
     <div id="detail"><span class="empty">Click any concept to see what it is and where you met it.</span></div>
   </div>
@@ -86,21 +98,13 @@ const CATCOLORS = {
 const color = c => CATCOLORS_get(c);
 function CATCOLORS_get(c){ return CATCOLORS[c] || CATCOLORS.other; }
 
-const nodesMap = DATA.nodes || {};
-const nodes = Object.values(nodesMap).map(n => ({...n,
-  x: (Math.random()-0.5)*600, y:(Math.random()-0.5)*400, vx:0, vy:0}));
-const idIndex = {}; nodes.forEach((n,i)=>idIndex[n.id]=n);
-const links = (DATA.edges||[]).filter(e=>idIndex[e.source]&&idIndex[e.target])
-  .map(e=>({source:idIndex[e.source], target:idIndex[e.target], type:e.type}));
+const rawNodes = DATA.nodes || {};
+const rawEdges = DATA.edges || [];
 
-document.getElementById('s-topics').textContent = nodes.filter(n=>!n.placeholder).length;
-document.getElementById('s-links').textContent = links.length;
-document.getElementById('s-turns').textContent = (DATA.meta&&DATA.meta.turns)||0;
-
-// Legend (only categories present)
-const cats = [...new Set(nodes.map(n=>n.category))];
-document.getElementById('legend').innerHTML = cats.map(c=>
-  `<span><i class="dot" style="background:${color(c)}"></i>${c}</span>`).join('');
+// Display filters. Defaults declutter the view: hide the "related" placeholder
+// concepts you haven't actually learned, and show every real link. Both are
+// live-adjustable from the sidebar; the underlying data is never discarded.
+const filters = { showRelated:false, minWeight:1 };
 
 const svg = document.getElementById('svg');
 const NS="http://www.w3.org/2000/svg";
@@ -113,33 +117,78 @@ const gNodes = document.createElementNS(NS,'g'); gRoot.appendChild(gNodes);
 function radius(n){ return 7 + Math.sqrt(n.count||1)*4; }
 
 const EDGECOLOR = {"co-occurs":"#5b6a99","related":"#40507a","shared-tag":"#2f6d7a"};
-const linkEls = links.map(l=>{
-  const el=document.createElementNS(NS,'line');
-  el.setAttribute('stroke', EDGECOLOR[l.type] || "#333a4d");
-  el.setAttribute('stroke-width', (1 + Math.min(l.weight||1,6)*0.35).toFixed(2));
-  el.setAttribute('stroke-opacity', l.type==='shared-tag' ? 0.55 : 0.8);
-  const title=document.createElementNS(NS,'title');
-  title.textContent = l.type + (l.tags&&l.tags.length?(' · '+l.tags.join(', ')):'') + ' ×'+(l.weight||1);
-  el.appendChild(title);
-  gLinks.appendChild(el); return el;
-});
 
-const nodeEls = nodes.map(n=>{
-  const g=document.createElementNS(NS,'g'); g.style.cursor='pointer';
-  const c=document.createElementNS(NS,'circle');
-  c.setAttribute('r', radius(n));
-  c.setAttribute('fill', color(n.category));
-  c.setAttribute('fill-opacity', n.placeholder?0.35:0.92);
-  c.setAttribute('stroke', '#0b0d12'); c.setAttribute('stroke-width',1.5);
-  const t=document.createElementNS(NS,'text');
-  t.textContent=n.name; t.setAttribute('font-size',11);
-  t.setAttribute('fill', n.placeholder?'#7b849b':'#dfe3ec');
-  t.setAttribute('x', radius(n)+4); t.setAttribute('y',4);
-  g.appendChild(c); g.appendChild(t); gNodes.appendChild(g);
-  g.addEventListener('click',(e)=>{e.stopPropagation(); showDetail(n);});
-  n._c=c; n._g=g;
-  return g;
-});
+// Rebuildable view state (reassigned by rebuild(); read every frame by tick).
+let nodes=[], links=[], nodeEls=[], linkEls=[], idIndex={};
+const posMemo = {};  // remember positions across rebuilds so toggles aren't jarring
+
+function buildData(){
+  idIndex={};
+  const visible = Object.values(rawNodes)
+    .filter(n => filters.showRelated || !n.placeholder);
+  nodes = visible.map(n => {
+    const p = posMemo[n.id];
+    return {...n,
+      x: p ? p.x : (Math.random()-0.5)*600,
+      y: p ? p.y : (Math.random()-0.5)*400, vx:0, vy:0};
+  });
+  nodes.forEach(n=>idIndex[n.id]=n);
+  links = rawEdges
+    .filter(e => (e.weight||1) >= filters.minWeight)
+    .filter(e => idIndex[e.source] && idIndex[e.target])
+    .map(e => ({source:idIndex[e.source], target:idIndex[e.target],
+                type:e.type, weight:e.weight||1, tags:e.tags||[]}));
+}
+
+function buildEls(){
+  gLinks.textContent=''; gNodes.textContent='';
+  linkEls = links.map(l=>{
+    const el=document.createElementNS(NS,'line');
+    el.setAttribute('stroke', EDGECOLOR[l.type] || "#333a4d");
+    el.setAttribute('stroke-width', (1 + Math.min(l.weight||1,6)*0.35).toFixed(2));
+    el.setAttribute('stroke-opacity', l.type==='shared-tag' ? 0.55 : 0.8);
+    const title=document.createElementNS(NS,'title');
+    title.textContent = l.type + (l.tags&&l.tags.length?(' · '+l.tags.join(', ')):'') + ' ×'+(l.weight||1);
+    el.appendChild(title);
+    gLinks.appendChild(el); return el;
+  });
+  nodeEls = nodes.map(n=>{
+    const g=document.createElementNS(NS,'g'); g.style.cursor='pointer';
+    const c=document.createElementNS(NS,'circle');
+    c.setAttribute('r', radius(n));
+    c.setAttribute('fill', color(n.category));
+    c.setAttribute('fill-opacity', n.placeholder?0.35:0.92);
+    c.setAttribute('stroke', '#0b0d12'); c.setAttribute('stroke-width',1.5);
+    const t=document.createElementNS(NS,'text');
+    t.textContent=n.name; t.setAttribute('font-size',11);
+    t.setAttribute('fill', n.placeholder?'#7b849b':'#dfe3ec');
+    t.setAttribute('x', radius(n)+4); t.setAttribute('y',4);
+    g.appendChild(c); g.appendChild(t); gNodes.appendChild(g);
+    g.addEventListener('click',(e)=>{e.stopPropagation(); showDetail(n);});
+    g.addEventListener('mousedown',(e)=>{
+      e.stopPropagation(); dragged=n; alpha=0.5;
+      const w=toWorld(e.offsetX,e.offsetY); dragOff={x:w.x-n.x,y:w.y-n.y};
+    });
+    n._c=c; n._g=g;
+    return g;
+  });
+}
+
+function updateStats(){
+  document.getElementById('s-topics').textContent =
+    Object.values(rawNodes).filter(n=>!n.placeholder).length;
+  document.getElementById('s-links').textContent = links.length;
+  document.getElementById('s-turns').textContent = (DATA.meta&&DATA.meta.turns)||0;
+  const cats = [...new Set(nodes.map(n=>n.category))];
+  document.getElementById('legend').innerHTML = cats.map(c=>
+    `<span><i class="dot" style="background:${color(c)}"></i>${c}</span>`).join('');
+}
+
+function rebuild(){
+  for(const n of nodes){ posMemo[n.id] = {x:n.x, y:n.y}; }  // stash positions
+  buildData(); buildEls(); updateStats();
+  applySearch(); alpha=1;
+}
 
 // ---- force simulation ----
 let alpha=1;
@@ -186,14 +235,9 @@ function render(){
 }
 
 // ---- interaction: pan / zoom / drag ----
+// (per-node drag handlers are attached in buildEls, since nodes are rebuildable)
 let dragged=null, dragOff={x:0,y:0}, panning=false, panStart=null;
 function toWorld(px,py){ return {x:(px-view.x)/view.k, y:(py-view.y)/view.k}; }
-nodes.forEach((n,i)=>{
-  nodeEls[i].addEventListener('mousedown',(e)=>{
-    e.stopPropagation(); dragged=n; alpha=0.5;
-    const w=toWorld(e.offsetX,e.offsetY); dragOff={x:w.x-n.x,y:w.y-n.y};
-  });
-});
 svg.addEventListener('mousedown',(e)=>{ panning=true; userMoved=true; panStart={x:e.offsetX-view.x,y:e.offsetY-view.y}; svg.classList.add('dragging');});
 window.addEventListener('mousemove',(e)=>{
   const rect=svg.getBoundingClientRect(); const ox=e.clientX-rect.left, oy=e.clientY-rect.top;
@@ -233,15 +277,27 @@ function showDetail(n){
   nodes.forEach(m=>m._c.setAttribute('stroke','#0b0d12'));
   n._c.setAttribute('stroke','#fff'); n._c.setAttribute('stroke-width',2.5);
 }
-document.getElementById('q').addEventListener('input',(e)=>{
-  const q=e.target.value.toLowerCase();
+function applySearch(){
+  const q=(document.getElementById('q').value||'').toLowerCase();
   nodes.forEach(n=>{
     const hit=!q || n.name.toLowerCase().includes(q);
     n._g.style.opacity = hit?1:0.12;
   });
-});
+}
+document.getElementById('q').addEventListener('input', applySearch);
 svg.addEventListener('click',()=>{ /* background click keeps last detail */ });
 
+// ---- declutter controls ----
+document.getElementById('showRelated').addEventListener('change',(e)=>{
+  filters.showRelated = e.target.checked; rebuild();
+});
+document.getElementById('minW').addEventListener('input',(e)=>{
+  filters.minWeight = +e.target.value;
+  document.getElementById('minWv').textContent = e.target.value;
+  rebuild();
+});
+
+rebuild();
 requestAnimationFrame(tick);
 if(nodes.length===0){
   document.getElementById('detail').innerHTML='<span class="empty">Nothing learned yet. Let Claude Code generate some code with the hook installed, then refresh.</span>';

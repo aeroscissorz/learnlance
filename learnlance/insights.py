@@ -126,12 +126,12 @@ def resolve_claude_bin(cfg: dict) -> str | None:
     return None
 
 
-def extract_insights_cli(cfg: dict, code_blob: str) -> dict:
+def _run_cli(cfg: dict, prompt: str) -> str:
+    """Send `prompt` to the logged-in `claude` CLI, return its raw text output."""
     claude = resolve_claude_bin(cfg)
     if not claude:
         raise RuntimeError("`claude` CLI not found on PATH; set claude_bin in config")
 
-    prompt = _build_prompt(cfg, code_blob)
     # -p = headless print mode; prompt is piped in via stdin (avoids arg-length /
     # quoting limits, especially the ~8k cmd.exe cap on Windows).
     args = [claude, "-p", "--output-format", "text"]
@@ -147,20 +147,24 @@ def extract_insights_cli(cfg: dict, code_blob: str) -> dict:
 
     proc = subprocess.run(
         args, input=prompt, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
         env=env, timeout=240,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"claude exited {proc.returncode}: {(proc.stderr or '')[:300]}")
-    result = _extract_json(proc.stdout)
+    return proc.stdout
+
+
+def extract_insights_cli(cfg: dict, code_blob: str) -> dict:
+    result = _extract_json(_run_cli(cfg, _build_prompt(cfg, code_blob)))
     return _finalize(result, cfg)
 
 
 # --------------------------------------------------------------------------- #
 # API backend — direct Anthropic call (needs a key)
 # --------------------------------------------------------------------------- #
-def extract_insights(cfg: dict, api_key: str, code_blob: str) -> dict:
-    """Returns {"did": str, "topics": [...]}. Raises on hard API/parse failure."""
-    prompt = _build_prompt(cfg, code_blob)
+def _run_api(cfg: dict, api_key: str, prompt: str) -> str:
+    """Send `prompt` to the Anthropic Messages API, return concatenated text."""
     payload = {
         "model": cfg.get("model"),
         "max_tokens": 1400,
@@ -172,4 +176,45 @@ def extract_insights(cfg: dict, api_key: str, code_blob: str) -> dict:
     for block in resp.get("content", []) or []:
         if block.get("type") == "text":
             text += block.get("text", "")
+    return text
+
+
+def extract_insights(cfg: dict, api_key: str, code_blob: str) -> dict:
+    """Returns {"did": str, "topics": [...]}. Raises on hard API/parse failure."""
+    text = _run_api(cfg, api_key, _build_prompt(cfg, code_blob))
     return _finalize(_extract_json(text), cfg)
+
+
+# --------------------------------------------------------------------------- #
+# Manual add — `learnlance add <topic>`
+# --------------------------------------------------------------------------- #
+def _build_add_prompt(topic: str, code_blob: str) -> str:
+    return (
+        SCHEMA_HINT.replace("{max_topics}", "3")
+        + f'\n\nThe developer wants to add the concept "{topic}" to their '
+          "knowledge graph — they believe it appears in their codebase but it "
+          "was missed. Using the code excerpts below, identify how "
+          f'"{topic}" (and at most a couple of tightly-related sub-concepts that '
+          "are genuinely present) show up, and return them. Put the concept that "
+          "most directly matches the developer's request FIRST, and make its "
+          '"why_here" cite where in the code it appears. If the concept truly is '
+          "not present in the code, return an empty topics list.\n\n"
+          "Here are the relevant code excerpts:\n\n"
+        + (code_blob or f"(no direct code matches were found for \"{topic}\")")
+    )
+
+
+def add_concept(cfg: dict, api_key: str, topic: str, code_blob: str) -> dict:
+    """Ask the backend to describe `topic` as it appears in the given code.
+
+    Returns {"did": str, "topics": [...]} just like the hook's extractor.
+    """
+    prompt = _build_add_prompt(topic, code_blob)
+    if cfg.get("backend", "cli") == "api":
+        text = _run_api(cfg, api_key, prompt)
+    else:
+        text = _run_cli(cfg, prompt)
+    result = _extract_json(text)
+    result["topics"] = (result.get("topics", []) or [])[:3]
+    result.setdefault("did", f"Manually added '{topic}'.")
+    return result

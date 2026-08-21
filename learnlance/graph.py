@@ -61,6 +61,66 @@ def save(graph: dict, path: Path | None = None) -> None:
     path.write_text(json.dumps(graph, indent=2), encoding="utf-8")
 
 
+def empty() -> dict:
+    """A fresh, empty graph (used by `learnlance clear`)."""
+    return {"nodes": {}, "edges": [], "sessions": {}, "tag_index": {},
+            "meta": {"turns": 0}}
+
+
+# --------------------------------------------------------------------------- #
+# removal
+# --------------------------------------------------------------------------- #
+def find_concepts(graph: dict, query: str) -> list[str]:
+    """Return node ids matching a query: exact slug first, else name substring.
+
+    Placeholder nodes are ignored — you can only target real concepts.
+    """
+    nodes = graph.get("nodes", {})
+    qs = slug(query)
+    if qs in nodes and not nodes[qs].get("placeholder"):
+        return [qs]
+    q = (query or "").strip().lower()
+    if not q:
+        return []
+    return sorted(
+        nid for nid, n in nodes.items()
+        if not n.get("placeholder") and q in (n.get("name", "").lower())
+    )
+
+
+def remove_node(graph: dict, nid: str) -> bool:
+    """Delete a node and every trace of it (edges, tag index, session lists)."""
+    if graph.get("nodes", {}).pop(nid, None) is None:
+        return False
+    graph["edges"] = [e for e in graph.get("edges", [])
+                      if e["source"] != nid and e["target"] != nid]
+    for bucket in graph.get("tag_index", {}).values():
+        if nid in bucket:
+            bucket.remove(nid)
+    graph["tag_index"] = {t: b for t, b in graph.get("tag_index", {}).items() if b}
+    for s in graph.get("sessions", {}).values():
+        if nid in s.get("topics", []):
+            s["topics"].remove(nid)
+    return True
+
+
+def prune_orphan_placeholders(graph: dict) -> list[str]:
+    """Drop placeholder nodes left with no edges (e.g. after removing a concept).
+
+    Returns the names of pruned placeholders.
+    """
+    linked: set[str] = set()
+    for e in graph.get("edges", []):
+        linked.add(e["source"])
+        linked.add(e["target"])
+    removed: list[str] = []
+    for nid, n in list(graph.get("nodes", {}).items()):
+        if n.get("placeholder") and nid not in linked:
+            graph["nodes"].pop(nid, None)
+            removed.append(n.get("name", nid))
+    return removed
+
+
 # --------------------------------------------------------------------------- #
 # edges
 # --------------------------------------------------------------------------- #
@@ -193,10 +253,14 @@ def update(graph: dict, insights: dict, context: dict) -> list[str]:
                 linked_this_node.add(b)
                 _link(graph, nid, b, "shared-tag", tag=nt)
 
-    # 3) concepts learned together this turn
-    for i in range(len(touched_ids)):
-        for j in range(i + 1, len(touched_ids)):
-            _link(graph, touched_ids[i], touched_ids[j], "co-occurs")
+    # 3) concepts learned together this turn. Link each to the turn's PRIMARY
+    #    concept (topics come "most important first") rather than fully
+    #    connecting them — a star of N-1 edges instead of a quadratic clique,
+    #    which is what turned single rich turns into a hairball.
+    if touched_ids:
+        hub = touched_ids[0]
+        for other in touched_ids[1:]:
+            _link(graph, hub, other, "co-occurs")
 
     if session:
         s = graph["sessions"].setdefault(session, {"cwd": cwd, "topics": [], "first": when})

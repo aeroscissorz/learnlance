@@ -7,10 +7,19 @@ dist/
 .venv/
 venv/
 
-# learnlance local runtime data / test homes
+# learnlance local runtime data / saved learnings / test homes
 .learnlance/
 .testhome*/
 .testconn/
+# saved learnings + other locally-generated artifacts (in case LEARNLANCE_HOME
+# points at the repo instead of the default ~/.learnlance)
+graph.json
+graph.html
+state.json
+config.json
+learnlance.log
+insights/
+work/
 
 # OS / editor
 .DS_Store

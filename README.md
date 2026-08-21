@@ -49,6 +49,30 @@ python -m learnlance config --claude-bin "C:\path\to\claude.cmd"
 learnlance show      # render + open the interactive knowledge graph in your browser
 learnlance list -v   # list learned concepts (with explanations) in the terminal
 learnlance stats     # quick counts, broken down by category
+learnlance help      # show every available command
+```
+
+The `show` view opens with a **live loading spinner** while it renders, then two
+declutter controls in the sidebar: *show related concepts* (reveal the dimmed
+umbrella nodes) and a *min link strength* slider (hide one-off links).
+
+### Add a concept Claude missed
+
+```bash
+learnlance add "debouncing"                 # searches the current dir for the topic
+learnlance add "topological sort" --path ./src
+learnlance add "event sourcing" --force     # add even if it's not found in the code
+```
+
+learnlance greps your codebase for the topic, sends the matching snippets to
+Claude, and adds the concept (and any tightly-related ones actually present)
+just like the hook does.
+
+### Clear the graph
+
+```bash
+learnlance clear "delta encoding"   # remove one concept (and any orphaned related nodes)
+learnlance clear                    # wipe the entire graph (asks first; -y to skip)
 ```
 
 Per-session markdown recaps are written to `~/.learnlance/insights/<session>.md`.
@@ -81,8 +105,10 @@ python -m learnlance uninstall
 | `hook.py` | Stop-hook entry; spawns the detached worker |
 | `transcript.py` | Parses Claude Code's JSONL transcript for generated code |
 | `insights.py` | Generates insights — via the `claude` CLI (default) or the API |
+| `codesearch.py` | Finds where a topic lives in your code (powers `add`) |
 | `graph.py` | Merges concepts into the persistent knowledge graph |
 | `viz.py` | Renders the offline, self-contained HTML graph |
+| `spinner.py` | The animated terminal loading indicator |
 | `install.py` | Wires the hook into `~/.claude/settings.json` |
 
 Zero third-party dependencies by design — the hook must run reliably wherever

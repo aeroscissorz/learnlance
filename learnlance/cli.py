@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+import os
 import sys
 import webbrowser
 
-from . import config, graph, hook, insights, install, viz
+from . import codesearch, config, graph, hook, insights, install, viz
+from .spinner import Spinner
 
 
 def _cmd_install(args):
@@ -74,8 +77,9 @@ def _cmd_config(args):
 
 
 def _cmd_show(args):
-    g = graph.load()
-    path = viz.render_html(g)
+    with Spinner("loading"):
+        g = graph.load()
+        path = viz.render_html(g)
     print(f"Graph written to {path}")
     if not args.no_open:
         webbrowser.open(path.as_uri())
@@ -110,6 +114,105 @@ def _cmd_stats(args):
         print("\nBy category:")
         for c, n in sorted(cats.items(), key=lambda x: -x[1]):
             print(f"  {c:18} {n}")
+
+
+def _confirm(prompt: str) -> bool:
+    """Ask a y/N question. Returns False for non-interactive / EOF / anything
+    that isn't an explicit yes, so we never destroy data by accident."""
+    try:
+        if not sys.stdin.isatty():
+            return False
+        return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
+def _cmd_clear(args):
+    g = graph.load()
+    if args.concept:
+        query = " ".join(args.concept).strip()
+        matches = graph.find_concepts(g, query)
+        if not matches:
+            print(f"No concept matching '{query}'. Try `learnlance list` to see names.")
+            return
+        if len(matches) > 1:
+            print(f"'{query}' matches {len(matches)} concepts — be more specific:")
+            for nid in matches:
+                print(f"  • {g['nodes'][nid]['name']}")
+            return
+        nid = matches[0]
+        name = g["nodes"][nid]["name"]
+        if not args.yes and not _confirm(f"Remove concept '{name}' from the graph?"):
+            print("Aborted.")
+            return
+        graph.remove_node(g, nid)
+        pruned = graph.prune_orphan_placeholders(g)
+        graph.save(g)
+        viz.render_html(g)
+        extra = f" (also pruned {len(pruned)} orphaned related node(s))" if pruned else ""
+        print(f"Removed '{name}'.{extra}")
+        return
+
+    # No concept given -> wipe the whole graph.
+    real = sum(1 for n in g.get("nodes", {}).values() if not n.get("placeholder"))
+    if not args.yes and not _confirm(
+        f"Clear the ENTIRE learning graph ({real} concepts)? This can't be undone."
+    ):
+        print("Aborted.")
+        return
+    graph.save(graph.empty())
+    viz.render_html(graph.load())
+    print("Learning graph cleared.")
+
+
+def _cmd_add(args):
+    cfg = config.load_config()
+    # Backend readiness (mirrors the hook's check, but speaks to the user).
+    if cfg.get("backend", "cli") == "api":
+        if not config.get_api_key(cfg):
+            print("Backend is 'api' but no API key is set. See `learnlance config`.")
+            return
+    elif not insights.resolve_claude_bin(cfg):
+        print("`claude` not found on PATH. Set it: learnlance config --claude-bin PATH")
+        return
+
+    topic = " ".join(args.topic).strip()
+    root = os.path.abspath(args.path or os.getcwd())
+
+    blob, files = codesearch.gather(topic, root, int(cfg.get("max_input_chars", 14000)))
+    if not blob and not args.force:
+        print(f"No code references to '{topic}' found under {root}.")
+        print("Use --force to add it from general knowledge anyway.")
+        return
+    if files:
+        print(f"Found '{topic}' referenced in {len(files)} file(s); asking Claude…")
+
+    api_key = config.get_api_key(cfg)
+    try:
+        with Spinner(f"analyzing '{topic}'"):
+            result = insights.add_concept(cfg, api_key, topic, blob)
+    except Exception as e:
+        print(f"Could not analyze '{topic}': {e}")
+        return
+
+    if not result.get("topics"):
+        print(f"Claude didn't find '{topic}' as a learnable concept in the code.")
+        return
+
+    g = graph.load()
+    new_names = graph.update(g, result, {
+        "when": _dt.datetime.now().isoformat(timespec="seconds"),
+        "session": "manual", "cwd": root, "files": files,
+    })
+    graph.save(g)
+    viz.render_html(g)
+    added = ", ".join(t["name"] for t in result["topics"])
+    tag = " (new)" if new_names else " (reinforced)"
+    print(f"Added: {added}{tag}")
+
+
+def _cmd_help(args):
+    build_parser().print_help()
 
 
 def _cmd_hook(args):
@@ -152,6 +255,21 @@ def build_parser() -> argparse.ArgumentParser:
     l.set_defaults(func=_cmd_list)
 
     sub.add_parser("stats", help="summary counts").set_defaults(func=_cmd_stats)
+
+    cl = sub.add_parser("clear", help="clear the whole graph, or one concept")
+    cl.add_argument("concept", nargs="*",
+                    help="concept name to remove; omit to clear the entire graph")
+    cl.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
+    cl.set_defaults(func=_cmd_clear)
+
+    a = sub.add_parser("add", help="add a concept Claude missed (searches your code)")
+    a.add_argument("topic", nargs="+", help="the concept to find and add, e.g. debouncing")
+    a.add_argument("--path", metavar="DIR", help="codebase to search (default: current dir)")
+    a.add_argument("--force", action="store_true",
+                   help="add even if no code references are found")
+    a.set_defaults(func=_cmd_add)
+
+    sub.add_parser("help", help="show this help message").set_defaults(func=_cmd_help)
 
     h = sub.add_parser("hook", help="(internal) Stop-hook entry point")
     h.set_defaults(func=_cmd_hook)
