@@ -14,7 +14,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from . import config, graph, insights, transcript, viz
+from . import adapters, config, core, insights
 
 
 def _now() -> str:
@@ -115,78 +115,23 @@ def run_worker(job_path: str) -> None:
 
 
 def process(payload: dict) -> None:
-    """The actual work: parse transcript -> insights -> graph -> html."""
+    """Route an incoming hook payload through the right adapter, then the core
+    engine. Harness-agnostic — Claude, git, etc. all land here."""
     try:
         cfg = config.load_config()
         if not _backend_ready(cfg):
             return
         api_key = config.get_api_key(cfg)
 
-        tpath = payload.get("transcript_path", "")
-        session = payload.get("session_id", "") or "unknown"
-        cwd = payload.get("cwd", "")
-        if not tpath:
+        adapter = adapters.detect(payload)
+        if adapter is None:
+            config.log(f"[{_now()}] no adapter for payload keys={list(payload)[:6]}")
             return
 
         state = _load_state()
-        sstate = state.get(session, {})
-        since = sstate.get("last_uuid")
+        event = adapter.to_event(payload, state, cfg)
+        _save_state(state)  # persist the resume cursor even if we skip
 
-        entries = transcript.read_entries(tpath)
-        if not entries:
-            return
-        gen = transcript.collect_new_generation(entries, since)
-
-        # Always advance the cursor so we never reprocess the same turn.
-        state[session] = {"last_uuid": gen["last_uuid"], "updated": _now()}
-        _save_state(state)
-
-        edits = gen["edits"]
-        total_chars = sum(len(e["code"]) for e in edits)
-        if not edits or total_chars < int(cfg.get("min_chars", 40)):
-            config.log(f"[{_now()}] {session[:8]}: no substantive code this turn, skipped")
-            return
-
-        blob = transcript.build_input_blob(gen, int(cfg.get("max_input_chars", 14000)))
-        result = insights.generate(cfg, api_key, blob)
-        if not result.get("topics"):
-            config.log(f"[{_now()}] {session[:8]}: nothing learnable")
-            return
-
-        g = graph.load()
-        files = sorted({e["file"] for e in edits})
-        new_names = graph.update(
-            g, result,
-            {"when": _now(), "session": session, "cwd": cwd, "files": files},
-        )
-        graph.save(g)
-        viz.render_html(g)
-        _write_recap(session, result, new_names, cwd)
-
-        # Best-effort: shown in Claude Code transcript view.
-        names = ", ".join(t["name"] for t in result["topics"])
-        print(f"🧠 learnlance: {result.get('did','')} — learned/reinforced: {names}")
+        core.process_event(cfg, api_key, event)
     except Exception as e:  # never surface a failure to the user's session
         config.log(f"[{_now()}] ERROR in process: {e!r}")
-
-
-def _write_recap(session: str, result: dict, new_names: list, cwd: str) -> None:
-    try:
-        md = config.INSIGHTS_DIR / f"{session}.md"
-        lines = []
-        if not md.exists():
-            lines.append(f"# Learning recap — session `{session[:12]}`\n")
-            if cwd:
-                lines.append(f"_Project: {cwd}_\n")
-        lines.append(f"\n## {_now()}\n")
-        lines.append(f"**What happened:** {result.get('did','')}\n")
-        for t in result["topics"]:
-            tag = " 🌱 *new*" if t["name"] in new_names else ""
-            lines.append(f"\n### {t['name']}{tag}  \n`{t.get('category','')}` · `{t.get('level','')}`\n")
-            lines.append(f"{t.get('explanation','')}\n")
-            if t.get("why_here"):
-                lines.append(f"> _Here:_ {t['why_here']}\n")
-        with md.open("a", encoding="utf-8") as fh:
-            fh.write("\n".join(lines) + "\n")
-    except Exception as e:
-        config.log(f"[{_now()}] recap write failed: {e!r}")

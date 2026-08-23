@@ -12,6 +12,12 @@ from .spinner import Spinner
 
 
 def _cmd_install(args):
+    if getattr(args, "git", False):
+        repo = os.path.abspath(args.path or os.getcwd())
+        print(install.install_git_hook(repo))
+        print("\nlearnlance will now learn from every commit in this repo — "
+              "regardless of which editor or AI wrote the code.")
+        return
     print(install.install_hook())
     cfg = config.load_config()
     backend = cfg.get("backend", "cli")
@@ -29,7 +35,71 @@ def _cmd_install(args):
 
 
 def _cmd_uninstall(args):
+    if getattr(args, "git", False):
+        repo = os.path.abspath(args.path or os.getcwd())
+        print(install.uninstall_git_hook(repo))
+        return
     print(install.uninstall_hook())
+
+
+def _cmd_doctor(args):
+    import importlib.metadata as _md
+    import platform
+    import shutil as _sh
+
+    cfg = config.load_config()
+    ok = lambda b: "✓" if b else "✗"
+
+    try:
+        ver = _md.version("learnlance")
+    except Exception:
+        from . import __version__ as ver  # running from source
+
+    git_ok = bool(_sh.which("git"))
+    claude_ok = bool(insights.resolve_claude_bin(cfg))
+    key_ok = bool(config.get_api_key(cfg))
+    backend = cfg.get("backend", "cli")
+    backend_ready = key_ok if backend == "api" else claude_ok
+
+    # Claude Stop hook present?
+    claude_hook = False
+    try:
+        sp = install.settings_path()
+        if sp.exists():
+            import json as _json
+            data = _json.loads(sp.read_text(encoding="utf-8"))
+            for grp in data.get("hooks", {}).get("Stop", []):
+                if any(install.MARK in h.get("command", "") for h in grp.get("hooks", [])):
+                    claude_hook = True
+    except Exception:
+        pass
+
+    # git hook present in cwd?
+    git_hook = False
+    try:
+        hd = install._hooks_dir(os.getcwd())
+        pc = hd / "post-commit" if hd else None
+        git_hook = bool(pc and pc.exists()
+                        and install.GIT_MARK in pc.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        pass
+
+    g = graph.load()
+    concepts = sum(1 for n in g.get("nodes", {}).values() if not n.get("placeholder"))
+
+    print("learnlance doctor\n")
+    print(f"  learnlance        {ok(True)} {ver}")
+    print(f"  python            {ok(True)} {platform.python_version()}")
+    print(f"  git               {ok(git_ok)}")
+    print(f"  backend           {backend}  ({ok(backend_ready)} ready)")
+    if backend == "cli":
+        print(f"  claude CLI        {ok(claude_ok)}"
+              + ("" if claude_ok else "  → learnlance config --claude-bin PATH"))
+    else:
+        print(f"  api key           {ok(key_ok)}")
+    print(f"  Claude Code hook  {ok(claude_hook)}" + ("" if claude_hook else "  → learnlance install"))
+    print(f"  git hook (here)   {ok(git_hook)}" + ("" if git_hook else "  → learnlance install --git"))
+    print(f"  concepts learned  {concepts}")
 
 
 def _cmd_config(args):
@@ -230,11 +300,19 @@ def build_parser() -> argparse.ArgumentParser:
     # _worker) are added below without help= so they stay out of the listing.
     sub = p.add_subparsers(
         dest="cmd",
-        metavar="{install,uninstall,config,show,list,stats,clear,add,help}",
+        metavar="{install,uninstall,config,show,list,stats,clear,add,doctor,help}",
     )
 
-    sub.add_parser("install", help="install the Claude Code Stop hook").set_defaults(func=_cmd_install)
-    sub.add_parser("uninstall", help="remove the Stop hook").set_defaults(func=_cmd_uninstall)
+    ins = sub.add_parser("install", help="install the Claude Code Stop hook (or --git)")
+    ins.add_argument("--git", action="store_true",
+                     help="install a git post-commit hook instead (works with any editor)")
+    ins.add_argument("--path", metavar="DIR", help="repo dir for --git (default: current dir)")
+    ins.set_defaults(func=_cmd_install)
+
+    un = sub.add_parser("uninstall", help="remove the Stop hook (or --git)")
+    un.add_argument("--git", action="store_true", help="remove the git post-commit hook instead")
+    un.add_argument("--path", metavar="DIR", help="repo dir for --git (default: current dir)")
+    un.set_defaults(func=_cmd_uninstall)
 
     c = sub.add_parser("config", help="view/set configuration")
     c.add_argument("--backend", choices=["cli", "api"],
@@ -274,6 +352,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="add even if no code references are found")
     a.set_defaults(func=_cmd_add)
 
+    sub.add_parser("doctor", help="check environment + which hooks are installed").set_defaults(func=_cmd_doctor)
+
     sub.add_parser("help", help="show this help message").set_defaults(func=_cmd_help)
 
     # Internal commands — no help= so they're omitted from the help listing.
@@ -287,6 +367,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    # Windows consoles often default to cp1252, which can't encode the ✓/•/🧠
+    # glyphs we print — that raises UnicodeEncodeError and crashes the command.
+    # Force UTF-8 (with replacement) so output never crashes on any console.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):
