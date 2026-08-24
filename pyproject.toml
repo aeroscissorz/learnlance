@@ -33,9 +33,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aeroscissorz/learnlance"
-Repository = "https://github.com/aeroscissorz/learnlance"
-Issues = "https://github.com/aeroscissorz/learnlance/issues"
+Homepage = "https://github.com/aeroscissorz/learnlance-univ"
+Repository = "https://github.com/aeroscissorz/learnlance-univ"
+Issues = "https://github.com/aeroscissorz/learnlance-univ/issues"
 
 [project.optional-dependencies]
 # The package itself stays stdlib-only; this is for running the test suite.
