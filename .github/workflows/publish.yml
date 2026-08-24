@@ -22,7 +22,11 @@ jobs:
     # Only proceed on a manual run or an explicit opt-in commit.
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
     runs-on: ubuntu-latest
+    # Job-level permissions REPLACE the workflow-level block rather than adding to
+    # it, so any scope omitted here becomes `none` -- including the contents:read
+    # that actions/checkout needs. Both must be listed.
     permissions:
+      contents: read # for actions/checkout
       id-token: write # REQUIRED for PyPI Trusted Publishing (OIDC)
     steps:
       - uses: actions/checkout@v4
