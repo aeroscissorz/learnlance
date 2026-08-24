@@ -11,8 +11,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from learnlance.hook import run_hook, run_worker  # noqa: E402
 
+def _arg(name: str) -> str | None:
+    """Read `--name value` or `--name=value` out of argv."""
+    for i, a in enumerate(sys.argv):
+        if a == name and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        if a.startswith(name + "="):
+            return a.split("=", 1)[1]
+    return None
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "_worker":
         run_worker(sys.argv[2])
     else:
-        run_hook()
+        # --source pins the adapter (e.g. Kiro). Must be forwarded, or the
+        # payload can't be routed and the hook silently does nothing.
+        run_hook(_arg("--source"), "--in-chat" in sys.argv)

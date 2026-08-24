@@ -7,39 +7,133 @@ import os
 import sys
 import webbrowser
 
-from . import codesearch, config, graph, hook, insights, install, viz
+from . import (autosetup, capabilities, codesearch, config, graph, hook, inchat,
+               insights, install, viz)
 from .spinner import Spinner
 
 
+# Harnesses selectable with a flag. Claude Code is the flagless default since
+# its hook is user-level rather than per-project.
+_INSTALLERS = {
+    "kiro": ("install_kiro_hook", "uninstall_kiro_hook"),
+    "cursor": ("install_cursor_hook", "uninstall_cursor_hook"),
+    "copilot": ("install_copilot_hook", "uninstall_copilot_hook"),
+    "gemini": ("install_gemini_hook", "uninstall_gemini_hook"),
+    "antigravity": ("install_antigravity_hook", "uninstall_antigravity_hook"),
+    "git": ("install_git_hook", "uninstall_git_hook"),
+}
+
+
+def _selected_harnesses(args) -> list[str]:
+    return [name for name in _INSTALLERS if getattr(args, name, False)]
+
+
 def _cmd_install(args):
-    if getattr(args, "git", False):
-        repo = os.path.abspath(args.path or os.getcwd())
-        print(install.install_git_hook(repo))
-        print("\nlearnlance will now learn from every commit in this repo — "
-              "regardless of which editor or AI wrote the code.")
+    chosen = _selected_harnesses(args)
+    in_chat = getattr(args, "in_chat", False)
+    if chosen:
+        project = os.path.abspath(args.path or os.getcwd())
+        unsupported = [n for n in chosen if in_chat and n not in inchat.SUPPORTED]
+        if unsupported:
+            print(f"--in-chat isn't available for: {', '.join(unsupported)}")
+            print("Supported: " + ", ".join(inchat.SUPPORTED))
+            return
+        for name in chosen:
+            fn = getattr(install, _INSTALLERS[name][0])
+            print(fn(project, in_chat) if name in inchat.SUPPORTED else fn(project))
+        print("\nlearnlance will now learn from the code these agents write.")
+        if in_chat:
+            print("No LLM CLI needed — the agent analyzes its own work in-chat.")
         return
+
     print(install.install_hook())
     cfg = config.load_config()
-    backend = cfg.get("backend", "cli")
-    if backend == "cli":
-        if insights.resolve_claude_bin(cfg):
-            print("\nBackend: cli — uses your logged-in `claude` (no API key needed).")
-        else:
-            print("\n⚠  Backend is 'cli' but `claude` wasn't found on PATH.")
-            print("     learnlance config --claude-bin \"C:\\path\\to\\claude.cmd\"")
+    label = insights.backend_label(cfg)
+    if label:
+        print(f"\nAnalysis backend: {label} — no API key needed.")
     else:
-        if not config.get_api_key(cfg):
-            print("\n⚠  Backend is 'api' but no API key is set:")
-            print("     learnlance config --set-key sk-ant-...   (or export ANTHROPIC_API_KEY)")
-    print("\nDone. New Claude Code sessions will now build your knowledge graph.")
+        print("\n⚠  No LLM CLI found, so nothing can be analyzed yet.")
+        print("     Install one of: " + ", ".join(n for n, _ in insights.KNOWN_BACKENDS))
+        print("     or point at any CLI: learnlance config --llm-cmd \"ollama run llama3\"")
+        print("     Edits are still captured meanwhile, and analyzed once one exists.")
+    print("\nDone. New sessions will now build your knowledge graph.")
 
 
 def _cmd_uninstall(args):
-    if getattr(args, "git", False):
-        repo = os.path.abspath(args.path or os.getcwd())
-        print(install.uninstall_git_hook(repo))
+    chosen = _selected_harnesses(args)
+    if chosen:
+        project = os.path.abspath(args.path or os.getcwd())
+        for name in chosen:
+            print(getattr(install, _INSTALLERS[name][1])(project))
         return
     print(install.uninstall_hook())
+
+
+def _cmd_setup(args):
+    """The one command to run after `pip install`.
+
+    Separate from the implicit auto-setup because that runs once ever, while four
+    of the six hooks are per-project — so this must work every time it's called,
+    in every project you want tracked.
+    """
+    here = os.path.abspath(args.path or os.getcwd())
+    in_chat = getattr(args, "in_chat", False)
+
+    print("learnlance setup\n")
+    print(f"  project: {here}\n")
+
+    print("Looking for agents to hook into...")
+    found = autosetup.detect_harnesses(here)
+    print("  ✓ Claude Code       user-level hook, always configured")
+    for name, spec in autosetup.HARNESSES.items():
+        # A tool's config directory is the only signal available without assuming
+        # it's on PATH — an IDE often isn't. So this says "we can configure it",
+        # not "it is definitely installed and in use".
+        mark = "✓" if name in found else "·"
+        note = "found its config dir" if name in found else "no config dir here"
+        cap = capabilities.CAPABILITIES.get(name)
+        if cap and cap.hook_confidence is capabilities.Confidence.DISPUTED:
+            note += "  (reports say its hooks may not fire)"
+        print(f"  {mark} {spec['label']:17} {note}")
+
+    print("\nConfiguring integrations...")
+    actions = autosetup.run(here, force=True, in_chat=in_chat)
+    if actions:
+        for a in actions:
+            print(f"  ✓ {a}")
+    else:
+        print("  (nothing new to configure)")
+
+    # Where will the analysis come from?
+    print("\nAnalysis backend...")
+    cfg = config.load_config()
+    label = insights.backend_label(cfg)
+    live_in_chat = [n for n in inchat.SUPPORTED if autosetup.hook_in_chat(n, here)]
+    if in_chat and live_in_chat:
+        print(f"  ✓ in-chat via {', '.join(live_in_chat)} — the agent analyzes its "
+              f"own work, no CLI needed")
+    elif label:
+        print(f"  ✓ {label}")
+    else:
+        print("  ✗ none — edits will be captured and held, but not analyzed yet")
+        print("      pick one:")
+        print("        learnlance setup --in-chat        (no install; uses your agent)")
+        print("        learnlance config --llm-cmd \"ollama run llama3\"")
+
+    if in_chat:
+        print("\nHow each agent will be asked...")
+        for name in autosetup.HARNESSES:
+            if not autosetup.hook_in_chat(name, here):
+                continue
+            cap = capabilities.CAPABILITIES.get(name)
+            if cap:
+                print(f"  {autosetup.HARNESSES[name]['label']:17} {cap.in_chat}")
+
+    print("\nlearnlance is configured.")
+    print("  Restart or reload your editor so it picks up the new hooks.")
+    print("  These integrations are built from each vendor's documentation but not")
+    print("  yet confirmed on this machine — make one edit, then `learnlance doctor`")
+    print("  will tell you which ones actually fired.")
 
 
 def _cmd_doctor(args):
@@ -56,69 +150,72 @@ def _cmd_doctor(args):
         from . import __version__ as ver  # running from source
 
     git_ok = bool(_sh.which("git"))
-    claude_ok = bool(insights.resolve_claude_bin(cfg))
-    key_ok = bool(config.get_api_key(cfg))
-    backend = cfg.get("backend", "cli")
-    backend_ready = key_ok if backend == "api" else claude_ok
+    backend = insights.backend_label(cfg)
+    here = os.getcwd()
 
-    # Claude Stop hook present?
-    claude_hook = False
-    try:
-        sp = install.settings_path()
-        if sp.exists():
-            import json as _json
-            data = _json.loads(sp.read_text(encoding="utf-8"))
-            for grp in data.get("hooks", {}).get("Stop", []):
-                if any(install.MARK in h.get("command", "") for h in grp.get("hooks", [])):
-                    claude_hook = True
-    except Exception:
-        pass
-
-    # git hook present in cwd?
-    git_hook = False
-    try:
-        hd = install._hooks_dir(os.getcwd())
-        pc = hd / "post-commit" if hd else None
-        git_hook = bool(pc and pc.exists()
-                        and install.GIT_MARK in pc.read_text(encoding="utf-8", errors="replace"))
-    except Exception:
-        pass
-
-    g = graph.load()
+    g = graph.load_project(here)
     concepts = sum(1 for n in g.get("nodes", {}).values() if not n.get("placeholder"))
+
+    in_chat_hooks = [n for n in inchat.SUPPORTED if autosetup.hook_in_chat(n, here)]
+    log = capabilities._log_text()
 
     print("learnlance doctor\n")
     print(f"  learnlance        {ok(True)} {ver}")
     print(f"  python            {ok(True)} {platform.python_version()}")
     print(f"  git               {ok(git_ok)}")
-    print(f"  backend           {backend}  ({ok(backend_ready)} ready)")
-    if backend == "cli":
-        print(f"  claude CLI        {ok(claude_ok)}"
-              + ("" if claude_ok else "  → learnlance config --claude-bin PATH"))
+    if backend:
+        print(f"  LLM backend       {ok(True)} {backend}")
+    elif in_chat_hooks:
+        print(f"  LLM backend       {ok(True)} in-chat via "
+              f"{', '.join(in_chat_hooks)} (no CLI needed)")
     else:
-        print(f"  api key           {ok(key_ok)}")
-    print(f"  Claude Code hook  {ok(claude_hook)}" + ("" if claude_hook else "  → learnlance install"))
-    print(f"  git hook (here)   {ok(git_hook)}" + ("" if git_hook else "  → learnlance install --git"))
+        print(f"  LLM backend       {ok(False)} none found "
+              f"({', '.join(n for n, _ in insights.KNOWN_BACKENDS)})")
+        print(f"                      → learnlance config --llm-cmd \"ollama run llama3\"")
+        print(f"                      → or: learnlance install --kiro --in-chat")
+
+    # Two separate claims: what's on disk, and what has actually run. Only the
+    # second is evidence, so they're never collapsed into one tick.
+    print()
+    print(f"  integrations (project: {os.path.basename(here)})")
+    claude_on = autosetup.claude_hook_present()
+    print(f"    {'Claude Code':15} {ok(claude_on)} "
+          f"{capabilities.status('claude', claude_on, False, log)}")
+    for name, label in (("kiro", "Kiro"), ("cursor", "Cursor"),
+                        ("copilot", "Copilot / VS Code"), ("gemini", "Gemini CLI"),
+                        ("antigravity", "Antigravity"), ("git", "git commit")):
+        present = autosetup.hook_present(name, here)
+        state = capabilities.status(name, present,
+                                    autosetup.hook_in_chat(name, here), log)
+        line = f"    {label:15} {ok(present)} {state}"
+        if not present:
+            line += f"   → learnlance install --{name}"
+        print(line)
+
+    unverified = [n for n in capabilities.CAPABILITIES
+                  if autosetup.hook_present(n, here)
+                  and not capabilities.evidence(n, log).fired]
+    if unverified:
+        print()
+        print("  'configured, unverified' means the hook config is written but that")
+        print("  harness has never invoked us. Reload the editor, make one edit, then")
+        print("  re-run doctor — it upgrades to 'working' once the log proves it.")
+
+    print()
     print(f"  concepts learned  {concepts}")
 
 
 def _cmd_config(args):
     cfg = config.load_config()
     changed = False
-    if args.backend is not None:
-        cfg["backend"] = args.backend
+    if args.llm_cmd is not None:
+        cfg["llm_cmd"] = args.llm_cmd
         changed = True
     if args.claude_bin is not None:
         cfg["claude_bin"] = args.claude_bin
         changed = True
     if args.cli_model is not None:
         cfg["cli_model"] = args.cli_model
-        changed = True
-    if args.set_key is not None:
-        cfg["api_key"] = args.set_key
-        changed = True
-    if args.model is not None:
-        cfg["model"] = args.model
         changed = True
     if args.enable:
         cfg["enabled"] = True
@@ -135,34 +232,32 @@ def _cmd_config(args):
     if changed:
         config.save_config(cfg)
         print("Saved config.")
-    # Show current state (mask the key)
-    shown = dict(cfg)
-    if shown.get("api_key"):
-        shown["api_key"] = shown["api_key"][:7] + "…"
-    key_src = "config" if cfg.get("api_key") else ("env" if config.get_api_key(cfg) else "MISSING")
     print(f"\nConfig ({config.CONFIG_PATH}):")
-    for k, v in shown.items():
+    for k, v in cfg.items():
         print(f"  {k}: {v}")
-    print(f"  api key source: {key_src}")
 
 
 def _cmd_show(args):
+    cwd = os.path.abspath(args.project or os.getcwd())
+    config.register_project(cwd)
     with Spinner("loading"):
-        g = graph.load()
-        path = viz.render_html(g)
+        g = graph.load_project(cwd)
+        path = viz.render_project_html(g, cwd)
     print(f"Graph written to {path}")
     if not args.no_open:
         webbrowser.open(path.as_uri())
 
 
 def _cmd_list(args):
-    g = graph.load()
+    cwd = os.path.abspath(args.project or os.getcwd())
+    g = graph.load_project(cwd)
     nodes = [n for n in g.get("nodes", {}).values() if not n.get("placeholder")]
     if not nodes:
-        print("Nothing learned yet. Install the hook and let Claude Code write some code.")
+        print(f"Nothing learned yet for {os.path.basename(cwd)}. "
+              "Install the hook and let an AI tool write some code.")
         return
     nodes.sort(key=lambda n: (-n.get("count", 0), n["name"].lower()))
-    print(f"{len(nodes)} concepts learned:\n")
+    print(f"{os.path.basename(cwd)}: {len(nodes)} concepts learned:\n")
     for n in nodes:
         print(f"  • {n['name']}  [{n.get('category','')}·{n.get('level','')}]  seen {n.get('count',0)}×")
         if args.verbose and n.get("explanation"):
@@ -170,12 +265,14 @@ def _cmd_list(args):
 
 
 def _cmd_stats(args):
-    g = graph.load()
+    cwd = os.path.abspath(args.project or os.getcwd())
+    g = graph.load_project(cwd)
     nodes = g.get("nodes", {})
     real = [n for n in nodes.values() if not n.get("placeholder")]
     cats: dict[str, int] = {}
     for n in real:
         cats[n.get("category", "other")] = cats.get(n.get("category", "other"), 0) + 1
+    print(f"Project          : {os.path.basename(cwd)}")
     print(f"Concepts learned : {len(real)}")
     print(f"Related links    : {len(g.get('edges', []))}")
     print(f"Turns analyzed   : {g.get('meta', {}).get('turns', 0)}")
@@ -184,6 +281,10 @@ def _cmd_stats(args):
         print("\nBy category:")
         for c, n in sorted(cats.items(), key=lambda x: -x[1]):
             print(f"  {c:18} {n}")
+    # Also show summary of all projects
+    registry = config.load_projects_registry()
+    if len(registry) > 1:
+        print(f"\n({len(registry)} projects tracked total — use `learnlance show` to browse all)")
 
 
 def _confirm(prompt: str) -> bool:
@@ -198,7 +299,8 @@ def _confirm(prompt: str) -> bool:
 
 
 def _cmd_clear(args):
-    g = graph.load()
+    cwd = os.path.abspath(args.project or os.getcwd())
+    g = graph.load_project(cwd)
     if args.concept:
         query = " ".join(args.concept).strip()
         matches = graph.find_concepts(g, query)
@@ -217,8 +319,8 @@ def _cmd_clear(args):
             return
         graph.remove_node(g, nid)
         pruned = graph.prune_orphan_placeholders(g)
-        graph.save(g)
-        viz.render_html(g)
+        graph.save_project(g, cwd)
+        viz.render_project_html(g, cwd)
         extra = f" (also pruned {len(pruned)} orphaned related node(s))" if pruned else ""
         print(f"Removed '{name}'.{extra}")
         return
@@ -226,24 +328,21 @@ def _cmd_clear(args):
     # No concept given -> wipe the whole graph.
     real = sum(1 for n in g.get("nodes", {}).values() if not n.get("placeholder"))
     if not args.yes and not _confirm(
-        f"Clear the ENTIRE learning graph ({real} concepts)? This can't be undone."
+        f"Clear the ENTIRE learning graph for {os.path.basename(cwd)} ({real} concepts)? This can't be undone."
     ):
         print("Aborted.")
         return
-    graph.save(graph.empty())
-    viz.render_html(graph.load())
-    print("Learning graph cleared.")
+    graph.save_project(graph.empty(), cwd)
+    viz.render_project_html(graph.load_project(cwd), cwd)
+    print(f"Learning graph cleared for {os.path.basename(cwd)}.")
 
 
 def _cmd_add(args):
     cfg = config.load_config()
-    # Backend readiness (mirrors the hook's check, but speaks to the user).
-    if cfg.get("backend", "cli") == "api":
-        if not config.get_api_key(cfg):
-            print("Backend is 'api' but no API key is set. See `learnlance config`.")
-            return
-    elif not insights.resolve_claude_bin(cfg):
-        print("`claude` not found on PATH. Set it: learnlance config --claude-bin PATH")
+    if not insights.resolve_backend(cfg):
+        print("No LLM CLI found. Install one of: "
+              + ", ".join(n for n, _ in insights.KNOWN_BACKENDS))
+        print("Or point at any CLI: learnlance config --llm-cmd \"ollama run llama3\"")
         return
 
     topic = " ".join(args.topic).strip()
@@ -257,10 +356,9 @@ def _cmd_add(args):
     if files:
         print(f"Found '{topic}' referenced in {len(files)} file(s); asking Claude…")
 
-    api_key = config.get_api_key(cfg)
     try:
         with Spinner(f"analyzing '{topic}'"):
-            result = insights.add_concept(cfg, api_key, topic, blob)
+            result = insights.add_concept(cfg, topic, blob)
     except Exception as e:
         print(f"Could not analyze '{topic}': {e}")
         return
@@ -269,13 +367,14 @@ def _cmd_add(args):
         print(f"Claude didn't find '{topic}' as a learnable concept in the code.")
         return
 
-    g = graph.load()
+    config.register_project(root)
+    g = graph.load_project(root)
     new_names = graph.update(g, result, {
         "when": _dt.datetime.now().isoformat(timespec="seconds"),
         "session": "manual", "cwd": root, "files": files,
     })
-    graph.save(g)
-    viz.render_html(g)
+    graph.save_project(g, root)
+    viz.render_project_html(g, root)
     added = ", ".join(t["name"] for t in result["topics"])
     tag = " (new)" if new_names else " (reinforced)"
     print(f"Added: {added}{tag}")
@@ -286,7 +385,7 @@ def _cmd_help(args):
 
 
 def _cmd_hook(args):
-    hook.run_hook()
+    hook.run_hook(getattr(args, "source", None), getattr(args, "in_chat", False))
 
 
 def _cmd_worker(args):
@@ -294,35 +393,62 @@ def _cmd_worker(args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="learnlance",
-        description="Turn what Claude Code builds into a growing knowledge graph.")
+    p = argparse.ArgumentParser(
+        prog="learnlance",
+        description="Turn what AI agents build into a growing knowledge graph. "
+                    "Run `learnlance setup` once per project to get started.")
     # metavar lists only the user-facing commands; internal ones (hook,
     # _worker) are added below without help= so they stay out of the listing.
     sub = p.add_subparsers(
         dest="cmd",
-        metavar="{install,uninstall,config,show,list,stats,clear,add,doctor,help}",
+        metavar="{setup,install,uninstall,config,show,list,stats,clear,add,doctor,help}",
     )
 
-    ins = sub.add_parser("install", help="install the Claude Code Stop hook (or --git)")
+    st_up = sub.add_parser("setup",
+                           help="detect your agents and configure them (run this first)")
+    st_up.add_argument("--in-chat", dest="in_chat", action="store_true",
+                       help="let the agent analyze its own work — no LLM CLI to install")
+    st_up.add_argument("--path", metavar="DIR", help="project dir (default: current dir)")
+    st_up.set_defaults(func=_cmd_setup)
+
+    ins = sub.add_parser("install",
+                         help="install hooks (Claude Code by default; or pick harnesses)")
+    ins.add_argument("--kiro", action="store_true", help="Kiro (PostToolUse + Stop)")
+    ins.add_argument("--cursor", action="store_true", help="Cursor (afterFileEdit + stop)")
+    ins.add_argument("--copilot", action="store_true",
+                     help="GitHub Copilot (postToolUse + agentStop)")
+    ins.add_argument("--gemini", action="store_true",
+                     help="Gemini CLI (AfterTool + AfterAgent)")
+    ins.add_argument("--antigravity", action="store_true",
+                     help="Google Antigravity (PostToolUse + Stop)")
     ins.add_argument("--git", action="store_true",
-                     help="install a git post-commit hook instead (works with any editor)")
-    ins.add_argument("--path", metavar="DIR", help="repo dir for --git (default: current dir)")
+                     help="git post-commit — universal fallback for tools with no hooks")
+    ins.add_argument("--in-chat", dest="in_chat", action="store_true",
+                     help="let the agent analyze its own work (no LLM CLI needed); "
+                          "the analysis happens visibly in your chat")
+    ins.add_argument("--path", metavar="DIR", help="repo/project dir (default: current dir)")
     ins.set_defaults(func=_cmd_install)
 
-    un = sub.add_parser("uninstall", help="remove the Stop hook (or --git)")
-    un.add_argument("--git", action="store_true", help="remove the git post-commit hook instead")
-    un.add_argument("--path", metavar="DIR", help="repo dir for --git (default: current dir)")
+    un = sub.add_parser("uninstall",
+                        help="remove hooks (Claude Code by default; or pick harnesses)")
+    un.add_argument("--kiro", action="store_true", help="remove the Kiro hooks")
+    un.add_argument("--cursor", action="store_true", help="remove the Cursor hooks")
+    un.add_argument("--copilot", action="store_true", help="remove the Copilot hooks")
+    un.add_argument("--gemini", action="store_true", help="remove the Gemini CLI hooks")
+    un.add_argument("--antigravity", action="store_true",
+                    help="remove the Antigravity hooks")
+    un.add_argument("--git", action="store_true", help="remove the git post-commit hook")
+    un.add_argument("--path", metavar="DIR", help="repo/project dir (default: current dir)")
     un.set_defaults(func=_cmd_uninstall)
 
     c = sub.add_parser("config", help="view/set configuration")
-    c.add_argument("--backend", choices=["cli", "api"],
-                   help="cli = use logged-in `claude` (no key); api = Anthropic API")
+    c.add_argument("--llm-cmd", dest="llm_cmd", metavar="CMD",
+                   help='LLM CLI used for analysis, e.g. "ollama run llama3" '
+                        '("" to go back to auto-detection)')
     c.add_argument("--claude-bin", dest="claude_bin", metavar="PATH",
-                   help="path to the claude executable (cli backend)")
+                   help="legacy alias: explicit path to the claude executable")
     c.add_argument("--cli-model", dest="cli_model", metavar="MODEL",
-                   help="optional model alias for the cli backend, e.g. haiku")
-    c.add_argument("--set-key", dest="set_key", metavar="KEY", help="Anthropic API key (api backend)")
-    c.add_argument("--model", help="model id for the api backend")
+                   help="optional model alias, e.g. haiku")
     c.add_argument("--enable", action="store_true")
     c.add_argument("--disable", action="store_true")
     c.add_argument("--background", choices=["on", "off"], help="run API work detached")
@@ -331,18 +457,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("show", help="render + open the HTML knowledge graph")
     s.add_argument("--no-open", action="store_true", help="just write the file")
+    s.add_argument("--project", metavar="DIR", help="project dir (default: current dir)")
     s.set_defaults(func=_cmd_show)
 
     l = sub.add_parser("list", help="list learned concepts in the terminal")
     l.add_argument("-v", "--verbose", action="store_true")
+    l.add_argument("--project", metavar="DIR", help="project dir (default: current dir)")
     l.set_defaults(func=_cmd_list)
 
-    sub.add_parser("stats", help="summary counts").set_defaults(func=_cmd_stats)
+    st = sub.add_parser("stats", help="summary counts")
+    st.add_argument("--project", metavar="DIR", help="project dir (default: current dir)")
+    st.set_defaults(func=_cmd_stats)
 
     cl = sub.add_parser("clear", help="clear the whole graph, or one concept")
     cl.add_argument("concept", nargs="*",
                     help="concept name to remove; omit to clear the entire graph")
     cl.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
+    cl.add_argument("--project", metavar="DIR", help="project dir (default: current dir)")
     cl.set_defaults(func=_cmd_clear)
 
     a = sub.add_parser("add", help="add a concept Claude missed (searches your code)")
@@ -358,6 +489,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Internal commands — no help= so they're omitted from the help listing.
     h = sub.add_parser("hook")
+    h.add_argument("--source", metavar="NAME",
+                   help="pin the adapter for this payload, e.g. kiro")
+    h.add_argument("--in-chat", dest="in_chat", action="store_true",
+                   help="ask the agent to analyze its own work instead of an LLM CLI")
     h.set_defaults(func=_cmd_hook)
     w = sub.add_parser("_worker")
     w.add_argument("job")
@@ -375,6 +510,18 @@ def main(argv=None) -> int:
             _stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+
+    # Auto-setup: on the first CLI invocation after pip install, detect which
+    # harnesses are in use and install their hooks. Never fails loudly.
+    try:
+        if autosetup.needs_setup():
+            actions = autosetup.run()
+            if actions:
+                print("learnlance: configured hooks for " + ", ".join(actions))
+                print("  (run `learnlance doctor` to check status)\n")
+    except Exception:
+        pass  # never block the CLI over autosetup
+
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):

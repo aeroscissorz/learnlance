@@ -1,6 +1,6 @@
 """The harness-agnostic event that the core engine operates on.
 
-Every AI coding harness (Claude Code, Cursor, Copilot, Gemini, …) has its own
+Every AI coding harness (Claude Code, Kiro, Cursor, Copilot, Gemini, …) has its own
 hook payload shape. An *adapter* (see adapters.py) normalizes each into this
 single `CodeEvent`, so the core learning engine never has to know which tool
 produced the code.
@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class CodeEvent:
-    source: str  # "claude" | "git" | "generic" | "cursor" | "copilot" | "gemini"
+    source: str  # "claude" | "kiro" | "git" | "generic" | "cursor" | "copilot" | "gemini"
     event: str  # normalized lifecycle: "after_agent_turn" | "after_commit" | …
     cwd: str = ""
     session: str = "unknown"

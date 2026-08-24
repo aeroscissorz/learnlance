@@ -6,11 +6,26 @@ build/
 dist/
 .venv/
 venv/
+.pytest_cache/
+
+# Hook configs learnlance generates for whatever agents are on THIS machine.
+# They embed absolute interpreter paths, so they're local setup, never source.
+# (.github/hooks only — .github/workflows is real and must stay tracked.)
+.kiro/
+.cursor/
+.agents/
+.gemini/
+.github/hooks/
+.claude/
 
 # learnlance local runtime data / saved learnings / test homes
 .learnlance/
 .testhome*/
 .testconn/
+
+# scratch files from local debugging
+_*.py
+_*.txt
 # saved learnings + other locally-generated artifacts (in case LEARNLANCE_HOME
 # points at the repo instead of the default ~/.learnlance)
 graph.json
@@ -20,6 +35,9 @@ config.json
 learnlance.log
 insights/
 work/
+pending/
+projects/
+projects.json
 
 # OS / editor
 .DS_Store

@@ -1,6 +1,9 @@
-"""learnlance — a learning companion for Claude Code.
+"""learnlance — a universal learning companion for AI coding tools.
 
-After every Claude Code turn, it extracts the concepts you could learn from the
-code that was generated and grows a personal knowledge graph.
+After every AI agent session (Claude Code, Kiro, Cursor, Copilot, Gemini, or any
+git commit), it extracts the concepts you could learn from the code that was
+generated and grows a personal knowledge graph.
+
+Zero-config: `pip install learnlance` auto-detects your tools and installs hooks.
 """
 __version__ = "0.1.0"

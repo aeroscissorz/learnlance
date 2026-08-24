@@ -55,10 +55,24 @@ def load(path: Path | None = None) -> dict:
     return g
 
 
+def load_project(cwd: str) -> dict:
+    """Load the graph for a specific project. Migrates legacy graph on first call."""
+    config.migrate_legacy_graph(cwd)
+    path = config.project_graph_path(cwd)
+    return load(path)
+
+
 def save(graph: dict, path: Path | None = None) -> None:
     path = path or config.GRAPH_PATH
     config.ensure_home()
     path.write_text(json.dumps(graph, indent=2), encoding="utf-8")
+
+
+def save_project(graph: dict, cwd: str) -> None:
+    """Save the graph for a specific project."""
+    path = config.project_graph_path(cwd)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save(graph, path)
 
 
 def empty() -> dict:

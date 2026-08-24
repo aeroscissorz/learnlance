@@ -1,9 +1,13 @@
 """Render the knowledge graph as a single self-contained, offline HTML file.
 No CDNs: a small vanilla-JS force-directed layout is embedded so the file works
-anywhere, forever."""
+anywhere, forever.
+
+Supports per-project graphs with a navigation panel to switch between projects.
+"""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from . import config
@@ -18,11 +22,35 @@ _TEMPLATE = r"""<!doctype html>
   :root{
     --bg:#0f1117; --panel:#171a23; --panel2:#1e222d; --line:#2a2f3d;
     --fg:#e7e9ee; --muted:#98a0b3; --accent:#6ea8fe;
+    --nav-w:220px;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
     font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-  #wrap{display:flex;height:100%}
+  #app{display:flex;height:100%}
+
+  /* --- project nav panel --- */
+  #nav{width:var(--nav-w);background:var(--panel);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+  #nav-header{padding:14px 16px 10px;border-bottom:1px solid var(--line)}
+  #nav-header h1{font-size:14px;margin:0;color:var(--accent);letter-spacing:.5px}
+  #nav-header .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  #project-list{flex:1;overflow-y:auto;padding:8px 0}
+  .proj-item{display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;
+    border-left:3px solid transparent;transition:background .15s}
+  .proj-item:hover{background:var(--panel2)}
+  .proj-item.active{background:var(--panel2);border-left-color:var(--accent)}
+  .proj-icon{width:32px;height:32px;border-radius:8px;background:var(--panel2);
+    border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+    font-size:14px;flex-shrink:0}
+  .proj-item.active .proj-icon{background:#1a2744;border-color:var(--accent)}
+  .proj-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .proj-meta{font-size:11px;color:var(--muted)}
+  .proj-info{min-width:0}
+  #nav-footer{padding:10px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+
+  /* --- main content area --- */
+  #wrap{display:flex;flex:1;height:100%;overflow:hidden}
   #graph{flex:1;position:relative;overflow:hidden}
   svg{width:100%;height:100%;display:block;cursor:grab}
   svg.dragging{cursor:grabbing}
@@ -62,66 +90,126 @@ _TEMPLATE = r"""<!doctype html>
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div id="graph">
-    <svg id="svg"></svg>
-    <div class="hint">drag nodes • scroll to zoom • click a concept</div>
+<div id="app">
+  <div id="nav">
+    <div id="nav-header">
+      <h1>learnlance</h1>
+      <div class="sub">your projects</div>
+    </div>
+    <div id="project-list"></div>
+    <div id="nav-footer"></div>
   </div>
-  <div id="side">
-    <h1>learnlance</h1>
-    <div class="sub">concepts you've picked up while coding with Claude</div>
-    <div class="stat">
-      <div><b id="s-topics">0</b><span>CONCEPTS</span></div>
-      <div><b id="s-links">0</b><span>LINKS</span></div>
-      <div><b id="s-turns">0</b><span>TURNS</span></div>
+  <div id="wrap">
+    <div id="graph">
+      <svg id="svg"></svg>
+      <div class="hint">drag nodes • scroll to zoom • click a concept</div>
     </div>
-    <input type="search" id="q" placeholder="Search concepts…" autocomplete="off">
-    <div class="controls">
-      <label><input type="checkbox" id="showRelated"> show related concepts (dimmed)</label>
-      <label>min link strength
-        <input type="range" id="minW" min="1" max="6" step="1" value="1">
-        <span class="val" id="minWv">1</span>
-      </label>
+    <div id="side">
+      <h1 id="proj-title">learnlance</h1>
+      <div class="sub" id="proj-subtitle">select a project to view its knowledge graph</div>
+      <div class="stat">
+        <div><b id="s-topics">0</b><span>CONCEPTS</span></div>
+        <div><b id="s-links">0</b><span>LINKS</span></div>
+        <div><b id="s-turns">0</b><span>TURNS</span></div>
+      </div>
+      <input type="search" id="q" placeholder="Search concepts…" autocomplete="off">
+      <div class="controls">
+        <label><input type="checkbox" id="showRelated"> show related concepts (dimmed)</label>
+        <label>min link strength
+          <input type="range" id="minW" min="1" max="6" step="1" value="1">
+          <span class="val" id="minWv">1</span>
+        </label>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div id="detail"><span class="empty">Click any concept to see what it is and where you met it.</span></div>
     </div>
-    <div class="legend" id="legend"></div>
-    <div id="detail"><span class="empty">Click any concept to see what it is and where you met it.</span></div>
   </div>
 </div>
 <script>
-const DATA = __DATA__;
+// ALL_PROJECTS: { slug: { name, path, concepts, turns } }
+const ALL_PROJECTS = __PROJECTS__;
+// GRAPHS: { slug: graphData }
+const GRAPHS = __GRAPHS__;
+// CURRENT: the slug of the initially-selected project
+let CURRENT = __CURRENT__;
+
 const CATCOLORS = {
   "algorithm":"#6ea8fe","data-structure":"#63e6be","language-feature":"#ffd43b",
   "pattern":"#da77f2","api":"#ff922b","security":"#ff6b6b","testing":"#4dabf7",
   "tooling":"#a9e34b","architecture":"#f783ac","math":"#38d9a9","domain":"#e599f7",
   "other":"#8d99b3"
 };
-const color = c => CATCOLORS_get(c);
-function CATCOLORS_get(c){ return CATCOLORS[c] || CATCOLORS.other; }
+const color = c => CATCOLORS[c] || CATCOLORS.other;
 
-const rawNodes = DATA.nodes || {};
-const rawEdges = DATA.edges || [];
-
-// Display filters. Defaults declutter the view: hide the "related" placeholder
-// concepts you haven't actually learned, and show every real link. Both are
-// live-adjustable from the sidebar; the underlying data is never discarded.
+let DATA, rawNodes, rawEdges;
 const filters = { showRelated:false, minWeight:1 };
 
 const svg = document.getElementById('svg');
 const NS="http://www.w3.org/2000/svg";
-let W=svg.clientWidth, H=svg.clientHeight;
-const view = {x:W/2, y:H/2, k:1};
+let W, H;
+const view = {x:0, y:0, k:1};
 const gRoot = document.createElementNS(NS,'g'); svg.appendChild(gRoot);
 const gLinks = document.createElementNS(NS,'g'); gRoot.appendChild(gLinks);
 const gNodes = document.createElementNS(NS,'g'); gRoot.appendChild(gNodes);
 
 function radius(n){ return 7 + Math.sqrt(n.count||1)*4; }
-
 const EDGECOLOR = {"co-occurs":"#5b6a99","related":"#40507a","shared-tag":"#2f6d7a"};
 
-// Rebuildable view state (reassigned by rebuild(); read every frame by tick).
 let nodes=[], links=[], nodeEls=[], linkEls=[], idIndex={};
-const posMemo = {};  // remember positions across rebuilds so toggles aren't jarring
+const posMemo = {};
 
+// --- Project Navigation ---
+function renderProjectList(){
+  const list = document.getElementById('project-list');
+  const slugs = Object.keys(ALL_PROJECTS);
+  if(slugs.length === 0){
+    list.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12px">No projects yet. Let an AI tool write some code with learnlance installed.</div>';
+    return;
+  }
+  list.innerHTML = slugs.map(slug => {
+    const p = ALL_PROJECTS[slug];
+    const initial = (p.name||'?')[0].toUpperCase();
+    const active = slug === CURRENT ? ' active' : '';
+    return `<div class="proj-item${active}" data-slug="${slug}">
+      <div class="proj-icon">${initial}</div>
+      <div class="proj-info">
+        <div class="proj-name">${esc(p.name)}</div>
+        <div class="proj-meta">${p.concepts} concepts</div>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.proj-item').forEach(el => {
+    el.addEventListener('click', () => switchProject(el.dataset.slug));
+  });
+  const total = slugs.reduce((s, k) => s + (ALL_PROJECTS[k].concepts||0), 0);
+  document.getElementById('nav-footer').textContent = `${slugs.length} project${slugs.length>1?'s':''} · ${total} concepts total`;
+}
+
+function switchProject(slug){
+  if(!GRAPHS[slug]) return;
+  CURRENT = slug;
+  DATA = GRAPHS[slug];
+  rawNodes = DATA.nodes || {};
+  rawEdges = DATA.edges || [];
+  // Reset positions for new project
+  Object.keys(posMemo).forEach(k => delete posMemo[k]);
+  // Update header
+  const p = ALL_PROJECTS[slug] || {};
+  document.getElementById('proj-title').textContent = p.name || slug;
+  document.getElementById('proj-subtitle').textContent = p.path || '';
+  // Re-highlight nav
+  document.querySelectorAll('.proj-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.slug === slug);
+  });
+  // Reset view
+  W = svg.clientWidth; H = svg.clientHeight;
+  view.x = W/2; view.y = H/2; view.k = 1;
+  userMoved = false;
+  rebuild();
+  document.getElementById('detail').innerHTML = '<span class="empty">Click any concept to see what it is and where you met it.</span>';
+}
+
+// --- Graph Engine (same as before) ---
 function buildData(){
   idIndex={};
   const visible = Object.values(rawNodes)
@@ -148,7 +236,7 @@ function buildEls(){
     el.setAttribute('stroke-width', (1 + Math.min(l.weight||1,6)*0.35).toFixed(2));
     el.setAttribute('stroke-opacity', l.type==='shared-tag' ? 0.55 : 0.8);
     const title=document.createElementNS(NS,'title');
-    title.textContent = l.type + (l.tags&&l.tags.length?(' · '+l.tags.join(', ')):'') + ' ×'+(l.weight||1);
+    title.textContent = l.type + (l.tags&&l.tags.length?(' · '+l.tags.join(', ')):'') + ' x'+(l.weight||1);
     el.appendChild(title);
     gLinks.appendChild(el); return el;
   });
@@ -185,7 +273,7 @@ function updateStats(){
 }
 
 function rebuild(){
-  for(const n of nodes){ posMemo[n.id] = {x:n.x, y:n.y}; }  // stash positions
+  for(const n of nodes){ posMemo[n.id] = {x:n.x, y:n.y}; }
   buildData(); buildEls(); updateStats();
   applySearch(); alpha=1;
 }
@@ -194,7 +282,6 @@ function rebuild(){
 let alpha=1;
 function tick(){
   alpha *= 0.985; if(alpha<0.02) alpha=0.02;
-  // repulsion
   for(let i=0;i<nodes.length;i++){
     for(let j=i+1;j<nodes.length;j++){
       const a=nodes[i], b=nodes[j];
@@ -204,7 +291,6 @@ function tick(){
       a.vx+=fx; a.vy+=fy; b.vx-=fx; b.vy-=fy;
     }
   }
-  // springs
   for(const l of links){
     const a=l.source,b=l.target;
     let dx=b.x-a.x, dy=b.y-a.y; let d=Math.sqrt(dx*dx+dy*dy)||0.01;
@@ -212,7 +298,6 @@ function tick(){
     const fx=dx/d*f, fy=dy/d*f;
     a.vx+=fx; a.vy+=fy; b.vx-=fx; b.vy-=fy;
   }
-  // centering + integrate
   for(const n of nodes){
     n.vx += (-n.x)*0.0015*alpha; n.vy += (-n.y)*0.0015*alpha;
     if(n===dragged) continue;
@@ -235,7 +320,6 @@ function render(){
 }
 
 // ---- interaction: pan / zoom / drag ----
-// (per-node drag handlers are attached in buildEls, since nodes are rebuildable)
 let dragged=null, dragOff={x:0,y:0}, panning=false, panStart=null;
 function toWorld(px,py){ return {x:(px-view.x)/view.k, y:(py-view.y)/view.k}; }
 svg.addEventListener('mousedown',(e)=>{ panning=true; userMoved=true; panStart={x:e.offsetX-view.x,y:e.offsetY-view.y}; svg.classList.add('dragging');});
@@ -256,7 +340,7 @@ svg.addEventListener('wheel',(e)=>{
 let userMoved=false;
 window.addEventListener('resize',()=>{
   W=svg.clientWidth; H=svg.clientHeight;
-  if(!userMoved){ view.x=W/2; view.y=H/2; }  // keep graph centered until the user pans/zooms
+  if(!userMoved){ view.x=W/2; view.y=H/2; }
 });
 
 // ---- detail panel + search ----
@@ -270,7 +354,7 @@ function showDetail(n){
   document.getElementById('detail').innerHTML =
     `<h2>${esc(n.name)}</h2>`+
     `<span class="tag">${esc(n.category)}</span>`+(n.level?`<span class="tag">${esc(n.level)}</span>`:'')+
-    `<span class="tag">seen ${n.count||0}×</span>`+`<span class="tag">${conns} links</span>`+
+    `<span class="tag">seen ${n.count||0}x</span>`+`<span class="tag">${conns} links</span>`+
     `<p>${esc(n.explanation)||'<span class="empty">A related concept — no explanation captured yet.</span>'}</p>`+
     (tags?`<div class="chips">${tags}</div>`:'')+
     ex;
@@ -285,9 +369,8 @@ function applySearch(){
   });
 }
 document.getElementById('q').addEventListener('input', applySearch);
-svg.addEventListener('click',()=>{ /* background click keeps last detail */ });
 
-// ---- declutter controls ----
+// ---- controls ----
 document.getElementById('showRelated').addEventListener('change',(e)=>{
   filters.showRelated = e.target.checked; rebuild();
 });
@@ -297,20 +380,113 @@ document.getElementById('minW').addEventListener('input',(e)=>{
   rebuild();
 });
 
-rebuild();
-requestAnimationFrame(tick);
-if(nodes.length===0){
-  document.getElementById('detail').innerHTML='<span class="empty">Nothing learned yet. Let Claude Code generate some code with the hook installed, then refresh.</span>';
+// ---- init ----
+function init(){
+  W = svg.clientWidth; H = svg.clientHeight;
+  view.x = W/2; view.y = H/2;
+  renderProjectList();
+  const slugs = Object.keys(ALL_PROJECTS);
+  if(CURRENT && GRAPHS[CURRENT]){
+    switchProject(CURRENT);
+  } else if(slugs.length > 0){
+    switchProject(slugs[0]);
+  } else {
+    DATA = {nodes:{},edges:[],meta:{turns:0}};
+    rawNodes = {}; rawEdges = [];
+    rebuild();
+    document.getElementById('detail').innerHTML='<span class="empty">Nothing learned yet. Let an AI tool generate some code with learnlance installed, then refresh.</span>';
+  }
+  requestAnimationFrame(tick);
 }
+init();
 </script>
 </body>
 </html>
 """
 
 
-def render_html(graph: dict, path: Path | None = None) -> Path:
+def _build_projects_data(current_slug: str | None = None) -> tuple[dict, dict, str | None]:
+    """Build the ALL_PROJECTS and GRAPHS dicts for the HTML template.
+
+    Returns (projects_meta, graphs, current_slug).
+    """
+    from . import graph
+
+    registry = config.load_projects_registry()
+    projects_meta = {}
+    graphs = {}
+
+    for slug, info in registry.items():
+        cwd = info.get("path", "")
+        gpath = config.project_graph_path(cwd)
+        g = graph.load(gpath) if gpath.exists() else graph.empty()
+        concepts = sum(1 for n in g.get("nodes", {}).values() if not n.get("placeholder"))
+        projects_meta[slug] = {
+            "name": info.get("name", slug),
+            "path": cwd,
+            "concepts": concepts,
+            "turns": g.get("meta", {}).get("turns", 0),
+        }
+        graphs[slug] = g
+
+    # If no current slug provided, pick the first one
+    if current_slug is None and projects_meta:
+        current_slug = next(iter(projects_meta))
+
+    return projects_meta, graphs, current_slug
+
+
+def render_html(graph_data: dict, path: Path | None = None) -> Path:
+    """Render the full multi-project HTML. Legacy single-graph compatibility."""
     path = path or config.HTML_PATH
     config.ensure_home()
-    html = _TEMPLATE.replace("__DATA__", json.dumps(graph))
+
+    projects_meta, graphs, current = _build_projects_data()
+
+    # If there are no registered projects but we have graph data, show it as "default"
+    if not projects_meta and graph_data.get("nodes"):
+        projects_meta["default"] = {"name": "default", "path": "", "concepts": 0, "turns": 0}
+        graphs["default"] = graph_data
+        current = "default"
+
+    html = _TEMPLATE.replace("__PROJECTS__", json.dumps(projects_meta))
+    html = html.replace("__GRAPHS__", json.dumps(graphs))
+    html = html.replace("__CURRENT__", json.dumps(current))
     path.write_text(html, encoding="utf-8")
     return path
+
+
+def render_project_html(graph_data: dict, cwd: str) -> Path:
+    """Render the multi-project HTML with a specific project selected.
+
+    Also writes a per-project HTML file for direct access.
+    """
+    slug = config.register_project(cwd)
+    config.ensure_home()
+
+    # Write per-project HTML (single graph, no nav — for quick access)
+    per_project_path = config.project_html_path(cwd)
+    per_project_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write the full multi-project HTML to the main location
+    projects_meta, graphs, _ = _build_projects_data(current_slug=slug)
+
+    # Make sure current project's graph is up to date
+    graphs[slug] = graph_data
+    concepts = sum(1 for n in graph_data.get("nodes", {}).values() if not n.get("placeholder"))
+    if slug in projects_meta:
+        projects_meta[slug]["concepts"] = concepts
+        projects_meta[slug]["turns"] = graph_data.get("meta", {}).get("turns", 0)
+
+    html = _TEMPLATE.replace("__PROJECTS__", json.dumps(projects_meta))
+    html = html.replace("__GRAPHS__", json.dumps(graphs))
+    html = html.replace("__CURRENT__", json.dumps(slug))
+
+    # Write to main HTML path (the full dashboard)
+    main_path = config.HTML_PATH
+    main_path.write_text(html, encoding="utf-8")
+
+    # Also write per-project copy
+    per_project_path.write_text(html, encoding="utf-8")
+
+    return main_path
