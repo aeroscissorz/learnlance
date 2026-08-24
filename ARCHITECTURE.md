@@ -158,9 +158,14 @@ sensible to configure at install time.
 So the contract is two commands:
 
 ```
-pip install learnlance
+pip install learnlance-univ
 learnlance setup            # or: learnlance setup --in-chat
 ```
+
+The distribution is `learnlance-univ`; the import package and the command are both
+`learnlance`, as with `pillow`/`PIL`. Don't install the older `learnlance`
+distribution alongside it — both provide the same `learnlance` module and console
+script, so whichever is installed second silently overwrites the other.
 
 `setup` detects the agents you have, writes their hook configs for *this* project,
 and reports where the analysis will come from. Run it again in each project you

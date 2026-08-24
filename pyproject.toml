@@ -3,7 +3,10 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "learnlance"
+# Distribution name (what you `pip install`). The import package below stays
+# `learnlance`, the way `pip install pillow` gives you `import PIL` — so the
+# module path, the `learnlance` command and ~/.learnlance are all unchanged.
+name = "learnlance-univ"
 version = "0.2.0"
 description = "Turn what AI coding agents build into a growing personal knowledge graph."
 readme = "README.md"
