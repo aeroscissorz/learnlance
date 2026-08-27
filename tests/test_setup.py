@@ -86,10 +86,11 @@ def test_setup_works_even_after_the_once_ever_gate_has_tripped(kiro_project, hom
     assert autosetup.hook_present("kiro", str(kiro_project)) is True
 
 
-def test_the_implicit_run_respects_the_gate(kiro_project, home):
+def test_implicit_run_configures_new_projects_even_after_first_run(kiro_project, home):
     autosetup.mark_done()
-    assert autosetup.run(str(kiro_project)) == []
-    assert autosetup.hook_present("kiro", str(kiro_project)) is False
+    actions = autosetup.run(str(kiro_project))
+    assert "Kiro" in actions
+    assert autosetup.hook_present("kiro", str(kiro_project)) is True
 
 
 def test_setup_enables_and_then_disables_in_chat(kiro_project, home):
@@ -189,6 +190,30 @@ def test_gemini_install_preserves_unrelated_settings(project, home):
     assert spec["theme"] == "dark"
     assert any("audit.sh" in json.dumps(d) for d in spec["hooks"]["AfterTool"])
 
+
+def test_codex_install_and_uninstall_preserve_other_hooks(project, home):
+    path = install.codex_hooks_path(str(project))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "description": "project policy",
+        "hooks": {"PreToolUse": [{"matcher": "Bash",
+                                    "hooks": [{"type": "command",
+                                               "command": "./guard.py"}]}]},
+    }), encoding="utf-8")
+
+    install.install_codex_hook(str(project), in_chat=True)
+    spec = json.loads(path.read_text("utf-8"))
+    assert spec["description"] == "project policy"
+    assert "guard.py" in json.dumps(spec["hooks"]["PreToolUse"])
+    assert len(spec["hooks"]["PostToolUse"]) == 1
+    assert len(spec["hooks"]["Stop"]) == 1
+    assert "--source codex --in-chat" in json.dumps(spec["hooks"]["Stop"])
+
+    install.uninstall_codex_hook(str(project))
+    spec = json.loads(path.read_text("utf-8"))
+    assert "PreToolUse" in spec["hooks"]
+    assert "PostToolUse" not in spec["hooks"]
+    assert "Stop" not in spec["hooks"]
 
 def test_cursor_timeout_is_in_seconds(project, home):
     install.install_cursor_hook(str(project))

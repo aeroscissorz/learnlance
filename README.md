@@ -1,6 +1,6 @@
 # learnlance 🧠🔍
 
-A learning companion for **Claude Code**. Every time Claude finishes a turn and
+A learning companion for **Claude Code, OpenAI Codex**, and other coding agents. Every time an agent finishes a turn and
 has generated or edited code, learnlance quietly:
 
 1. reads the session transcript and pulls out the code that was just written,
@@ -56,6 +56,23 @@ The `show` view opens with a **live loading spinner** while it renders, then two
 declutter controls in the sidebar: *show related concepts* (reveal the dimmed
 umbrella nodes) and a *min link strength* slider (hide one-off links).
 
+### OpenAI Codex
+
+Install the project-local Codex hooks with:
+
+```bash
+python -m learnlance install --codex
+```
+
+Codex's native `apply_patch` edits are captured through `PostToolUse` and
+analyzed at `Stop`. After installing, review/trust the hook in Codex with
+`/hooks`. Use `--in-chat` if you want Codex to analyze its own work.
+
+When you run any `learnlance` command in a project, it automatically detects
+active agent environments and installs missing project hooks. This also works
+when you move to a new project after the first setup; no separate setup command
+is required.
+
 ### Add a concept Claude missed
 
 ```bash
@@ -110,6 +127,7 @@ python -m learnlance uninstall
 | `viz.py` | Renders the offline, self-contained HTML graph |
 | `spinner.py` | The animated terminal loading indicator |
 | `install.py` | Wires the hook into `~/.claude/settings.json` |
+| `adapters.py` | Translates each agent's hook payload, including Codex patches |
 
 Zero third-party dependencies by design — the hook must run reliably wherever
 Claude Code launches it.

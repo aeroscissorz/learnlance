@@ -17,6 +17,7 @@ venv/
 .gemini/
 .github/hooks/
 .claude/
+.codex/
 
 # learnlance local runtime data / saved learnings / test homes
 .learnlance/

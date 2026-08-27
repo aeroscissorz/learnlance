@@ -233,3 +233,37 @@ def test_claude_and_buffered_adapters_produce_the_same_blob_format(cfg, project,
         {"edits": [{"file": "app/delta.py", "code": CODE, "action": "created"}],
          "user_prompt": ""}, 14000)
     assert buffered_blob == claude_blob
+
+
+def test_codex_extracts_added_code_from_apply_patch(cfg, project, home):
+    payload = {
+        "source": "codex", "hook_event_name": "PostToolUse",
+        "session_id": "cx", "cwd": str(project), "tool_name": "apply_patch",
+        "tool_input": {"command": "*** Begin Patch\n"
+                        "*** Add File: app/main.py\n"
+                        "+def main():\n"
+                        "+    return 42\n"
+                        "*** Update File: app/other.py\n"
+                        "@@\n-old()\n+new()\n"
+                        "*** End Patch"},
+    }
+    event = adapters.detect(payload).to_event(payload, {}, cfg)
+    assert event.skip_reason and "buffered 2 edit" in event.skip_reason
+    edits = pending.load("cx")["edits"]
+    assert edits[0]["file"] == "app/main.py"
+    assert "def main" in edits[0]["code"]
+    assert edits[1]["file"] == "app/other.py"
+    assert edits[1]["code"] == "new()"
+
+
+def test_codex_ignores_bash_and_stop_without_edits(cfg, project, home):
+    session = "cx-bash"
+    payload = {"source": "codex", "hook_event_name": "PostToolUse",
+               "session_id": session, "cwd": str(project), "tool_name": "Bash",
+               "tool_input": {"command": "echo hi > app/main.py"}}
+    event = adapters.detect(payload).to_event(payload, {}, cfg)
+    assert event.skip_reason and "no new code" in event.skip_reason
+    end = {"source": "codex", "hook_event_name": "Stop", "session_id": session,
+           "cwd": str(project)}
+    finished = adapters.detect(end).to_event(end, {}, cfg)
+    assert finished.skip_reason == "no code edits captured this session"

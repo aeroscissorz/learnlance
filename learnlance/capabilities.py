@@ -89,6 +89,13 @@ CAPABILITIES: dict[str, Capability] = {
              "though they do in Antigravity CLI. Its `enabled` flag also defaults "
              "to false. The least confirmed of the six.",
     ),
+    "codex": Capability(
+        hook="PostToolUse + Stop",
+        in_chat='Stop -> {"decision": "block", "reason": ...}',
+        note="Captures Codex's native apply_patch edits. Bash commands are not "
+             "captured because their file changes cannot be attributed reliably "
+             "from the hook payload. Requires Codex hook trust review.",
+    ),
     "git": Capability(
         hook="post-commit",
         in_chat="",

@@ -6,6 +6,7 @@ Per harness:
   * Cursor       afterFileEdit + stop in .cursor/hooks.json.
   * Copilot      postToolUse + agentStop in .github/hooks/learnlance.json.
   * Gemini CLI   AfterTool + AfterAgent in .gemini/settings.json.
+  * Codex        PostToolUse + Stop in .codex/hooks.json.
   * git          post-commit in a repo (universal fallback — triggers on commit,
                  so it works with any editor, but see ARCHITECTURE.md for why
                  it's the last resort rather than the default).
@@ -30,6 +31,7 @@ GIT_MARK = "learnlance-post-commit"  # marker line inside the git hook script
 KIRO_MARK = "learnlance-kiro"  # identifier for the Kiro hook file
 KIRO_HOOK_FILENAME = "learnlance.json"  # hook file name inside .kiro/hooks/
 COPILOT_HOOK_FILENAME = "learnlance.json"  # hook file name inside .github/hooks/
+CODEX_HOOK_FILENAME = "hooks.json"  # shared Codex hook file inside .codex/
 
 
 def settings_path() -> Path:
@@ -393,6 +395,55 @@ def uninstall_copilot_hook(project: str) -> str:
                 f"Remove it manually if you're sure.")
     target.unlink()
     return f"Removed learnlance Copilot hook at {target}"
+
+
+# --------------------------------------------------------------------------- #
+# OpenAI Codex (.codex/hooks.json — shared file, merge)
+# --------------------------------------------------------------------------- #
+def codex_hooks_path(project: str) -> Path:
+    return Path(project) / ".codex" / CODEX_HOOK_FILENAME
+
+
+CODEX_EVENTS = ("PostToolUse", "Stop")
+
+
+def install_codex_hook(project: str, in_chat: bool = False) -> str:
+    """Register Codex's native patch and end-of-turn hooks.
+
+    Codex loads all matching hooks from this shared file, so merge only our
+    entries and leave other project hooks untouched.
+    """
+    target = codex_hooks_path(project)
+    data = _read_json(target)
+    hooks = data.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        return f"{target} has an unexpected 'hooks' shape; leaving it alone."
+    capture = {"matcher": "apply_patch|Edit|Write", "hooks": [{
+        "type": "command", "command": _source_cmd("codex"), "timeout": 30,
+    }]}
+    stop = {"hooks": [{
+        "type": "command", "command": _source_cmd("codex", in_chat), "timeout": 30,
+    }]}
+    _merge_event(hooks, "PostToolUse", capture)
+    _merge_event(hooks, "Stop", stop)
+    data["description"] = data.get("description", "LearnLance Codex hooks")
+    _write_json(target, data)
+    return f"Installed Codex hooks at {target}\n  (PostToolUse + Stop)"
+
+
+def uninstall_codex_hook(project: str) -> str:
+    target = codex_hooks_path(project)
+    if not target.exists():
+        return "No Codex hooks.json here; nothing to remove."
+    data = _read_json(target)
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return "No learnlance Codex hooks found; nothing to remove."
+    n = _drop_ours(hooks, CODEX_EVENTS)
+    if not n:
+        return "No learnlance Codex hooks found; nothing to remove."
+    _write_json(target, data)
+    return f"Removed {n} learnlance hook entr(y/ies) from {target}"
 
 
 # --------------------------------------------------------------------------- #

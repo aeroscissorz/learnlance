@@ -20,6 +20,7 @@ _INSTALLERS = {
     "copilot": ("install_copilot_hook", "uninstall_copilot_hook"),
     "gemini": ("install_gemini_hook", "uninstall_gemini_hook"),
     "antigravity": ("install_antigravity_hook", "uninstall_antigravity_hook"),
+    "codex": ("install_codex_hook", "uninstall_codex_hook"),
     "git": ("install_git_hook", "uninstall_git_hook"),
 }
 
@@ -78,62 +79,59 @@ def _cmd_setup(args):
     """
     here = os.path.abspath(args.path or os.getcwd())
     in_chat = getattr(args, "in_chat", False)
+    verbose = getattr(args, "verbose", False)
 
-    print("learnlance setup\n")
-    print(f"  project: {here}\n")
-
-    print("Looking for agents to hook into...")
-    found = autosetup.detect_harnesses(here)
-    print("  ✓ Claude Code       user-level hook, always configured")
-    for name, spec in autosetup.HARNESSES.items():
-        # A tool's config directory is the only signal available without assuming
-        # it's on PATH — an IDE often isn't. So this says "we can configure it",
-        # not "it is definitely installed and in use".
-        mark = "✓" if name in found else "·"
-        note = "found its config dir" if name in found else "no config dir here"
-        cap = capabilities.CAPABILITIES.get(name)
-        if cap and cap.hook_confidence is capabilities.Confidence.DISPUTED:
-            note += "  (reports say its hooks may not fire)"
-        print(f"  {mark} {spec['label']:17} {note}")
-
-    print("\nConfiguring integrations...")
     actions = autosetup.run(here, force=True, in_chat=in_chat)
-    if actions:
-        for a in actions:
-            print(f"  ✓ {a}")
-    else:
-        print("  (nothing new to configure)")
+    configured = [autosetup.HARNESSES[n]["label"] for n in autosetup.HARNESSES
+                  if autosetup.hook_present(n, here)]
+    if autosetup.claude_hook_present():
+        configured.insert(0, "Claude Code")
 
-    # Where will the analysis come from?
-    print("\nAnalysis backend...")
+    print(f"learnlance is set up for {os.path.basename(here)}.\n")
+    if configured:
+        print("  Watching: " + ", ".join(configured))
+    else:
+        print("  No agents found here. `learnlance install --help` lists them.")
+
     cfg = config.load_config()
     label = insights.backend_label(cfg)
     live_in_chat = [n for n in inchat.SUPPORTED if autosetup.hook_in_chat(n, here)]
-    if in_chat and live_in_chat:
-        print(f"  ✓ in-chat via {', '.join(live_in_chat)} — the agent analyzes its "
-              f"own work, no CLI needed")
+    if live_in_chat:
+        print("  Analysis: your agent does it in-chat — nothing else to install.")
     elif label:
-        print(f"  ✓ {label}")
+        print(f"  Analysis: {label}")
     else:
-        print("  ✗ none — edits will be captured and held, but not analyzed yet")
-        print("      pick one:")
-        print("        learnlance setup --in-chat        (no install; uses your agent)")
-        print("        learnlance config --llm-cmd \"ollama run llama3\"")
+        print("  Analysis: none yet, so edits are held rather than analyzed. Either:")
+        print("              learnlance setup --in-chat")
+        print("              learnlance config --llm-cmd \"ollama run llama3\"")
 
-    if in_chat:
-        print("\nHow each agent will be asked...")
-        for name in autosetup.HARNESSES:
-            if not autosetup.hook_in_chat(name, here):
-                continue
-            cap = capabilities.CAPABILITIES.get(name)
-            if cap:
-                print(f"  {autosetup.HARNESSES[name]['label']:17} {cap.in_chat}")
+    print("\n  Reload your editor, then just code.")
+    print("  `learnlance doctor` shows what's actually firing, "
+          "`learnlance show` opens the graph.")
 
-    print("\nlearnlance is configured.")
-    print("  Restart or reload your editor so it picks up the new hooks.")
-    print("  These integrations are built from each vendor's documentation but not")
-    print("  yet confirmed on this machine — make one edit, then `learnlance doctor`")
-    print("  will tell you which ones actually fired.")
+    # Everything below is diagnostic detail: which harness uses which mechanism,
+    # and where confidence is low. Useful when something isn't working, noise
+    # otherwise, so it stays behind --verbose rather than greeting every install.
+    if not verbose:
+        return
+
+    print("\n  --- detail ---")
+    found = autosetup.detect_harnesses(here)
+    for name, spec in autosetup.HARNESSES.items():
+        # A tool's config directory is the only signal available without assuming
+        # it's on PATH — an IDE often isn't. So this means "we can configure it",
+        # not "it is definitely installed and in use".
+        cap = capabilities.CAPABILITIES.get(name)
+        bits = ["config dir found" if name in found else "no config dir"]
+        if autosetup.hook_in_chat(name, here) and cap and cap.in_chat:
+            bits.append(f"asked via {cap.in_chat}")
+        if cap and cap.hook_confidence is capabilities.Confidence.DISPUTED:
+            bits.append("reports say its hooks may not fire")
+        print(f"  {spec['label']:18} {'; '.join(bits)}")
+    if actions:
+        print(f"\n  Reconfigured this run: {', '.join(actions)}")
+    print("\n  These integrations follow each vendor's documented hook API but are")
+    print("  unconfirmed on this machine until one actually fires.")
 
 
 def _cmd_doctor(args):
@@ -183,7 +181,8 @@ def _cmd_doctor(args):
           f"{capabilities.status('claude', claude_on, False, log)}")
     for name, label in (("kiro", "Kiro"), ("cursor", "Cursor"),
                         ("copilot", "Copilot / VS Code"), ("gemini", "Gemini CLI"),
-                        ("antigravity", "Antigravity"), ("git", "git commit")):
+                        ("antigravity", "Antigravity"), ("codex", "OpenAI Codex"),
+                        ("git", "git commit")):
         present = autosetup.hook_present(name, here)
         state = capabilities.status(name, present,
                                     autosetup.hook_in_chat(name, here), log)
@@ -408,6 +407,8 @@ def build_parser() -> argparse.ArgumentParser:
                            help="detect your agents and configure them (run this first)")
     st_up.add_argument("--in-chat", dest="in_chat", action="store_true",
                        help="let the agent analyze its own work — no LLM CLI to install")
+    st_up.add_argument("-v", "--verbose", action="store_true",
+                       help="also show per-agent mechanisms and confidence")
     st_up.add_argument("--path", metavar="DIR", help="project dir (default: current dir)")
     st_up.set_defaults(func=_cmd_setup)
 
@@ -421,6 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Gemini CLI (AfterTool + AfterAgent)")
     ins.add_argument("--antigravity", action="store_true",
                      help="Google Antigravity (PostToolUse + Stop)")
+    ins.add_argument("--codex", action="store_true",
+                     help="OpenAI Codex (PostToolUse + Stop)")
     ins.add_argument("--git", action="store_true",
                      help="git post-commit — universal fallback for tools with no hooks")
     ins.add_argument("--in-chat", dest="in_chat", action="store_true",
@@ -436,7 +439,8 @@ def build_parser() -> argparse.ArgumentParser:
     un.add_argument("--copilot", action="store_true", help="remove the Copilot hooks")
     un.add_argument("--gemini", action="store_true", help="remove the Gemini CLI hooks")
     un.add_argument("--antigravity", action="store_true",
-                    help="remove the Antigravity hooks")
+                     help="remove the Antigravity hooks")
+    un.add_argument("--codex", action="store_true", help="remove the Codex hooks")
     un.add_argument("--git", action="store_true", help="remove the git post-commit hook")
     un.add_argument("--path", metavar="DIR", help="repo/project dir (default: current dir)")
     un.set_defaults(func=_cmd_uninstall)

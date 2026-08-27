@@ -22,7 +22,7 @@ Two shapes of harness show up here:
   * **Transcript-style** (Claude Code) hands over the whole turn in one call, so
     the adapter reads every edit out of the transcript and is done.
 
-  * **Tool-at-a-time** (Kiro, Cursor, Copilot, Gemini) notifies you once per tool
+  * **Tool-at-a-time** (Kiro, Cursor, Copilot, Gemini, Codex) notifies you once per tool
     call and gives you nothing at the end. `BufferedToolAdapter` implements that
     pattern once: each edit is appended to a per-session buffer (pending.py), and
     the harness's end-of-turn event drains it into a single event.
@@ -390,6 +390,68 @@ class AntigravityAdapter(BufferedToolAdapter):
 
 
 # --------------------------------------------------------------------------- #
+# OpenAI Codex CLI
+# --------------------------------------------------------------------------- #
+class CodexAdapter(BufferedToolAdapter):
+    """Codex: `PostToolUse` on `apply_patch`, drained on `Stop`.
+
+    Codex's native edit tool puts an OpenAI-style patch in
+    ``tool_input.command``.  We keep only added lines from each patch so the
+    learner sees code rather than the patch syntax itself.  Bash edits are
+    intentionally not captured: their effects cannot be attributed reliably
+    from a hook payload.
+    """
+
+    source = "codex"
+    write_tools = {
+        # Codex reports apply_patch as the canonical name; Edit and Write are
+        # matcher aliases accepted by Codex for the same native edit path.
+        "apply_patch": (("command", "patch", "input", "content"), "edited"),
+        "Edit": (("command", "patch", "input", "content"), "edited"),
+        "Write": (("command", "patch", "input", "content"), "edited"),
+    }
+    end_events = ("stop",)
+    prompt_keys = ("prompt", "user_prompt", "userPrompt", "last_assistant_message")
+
+    def extract_edits(self, payload, event_name):
+        tool = self.read_tool(payload)
+        if tool not in self.write_tools:
+            return []
+        args = self.read_tool_input(payload)
+        patch = _first(args, "command", "patch", "input", "content", default="")
+        if not isinstance(patch, str) or not patch:
+            return []
+        return _codex_patch_edits(patch)
+
+
+def _codex_patch_edits(patch: str) -> list[dict]:
+    """Extract added lines grouped by file from Codex apply_patch syntax."""
+    current = None
+    out = []
+    chunks: dict[str, list[str]] = {}
+    for line in patch.splitlines():
+        if line.startswith("*** Add File: ") or line.startswith("*** Update File: "):
+            current = line.split(": ", 1)[1].strip()
+            chunks.setdefault(current, [])
+            continue
+        if line.startswith("*** Delete File: "):
+            current = None
+            continue
+        # Also accept ordinary unified diffs for forward compatibility.
+        if line.startswith("+++ b/"):
+            current = line[6:].strip()
+            chunks.setdefault(current, [])
+            continue
+        if current and line.startswith("+") and not line.startswith("+++"):
+            chunks[current].append(line[1:])
+    for path, lines in chunks.items():
+        code = "\n".join(lines)
+        if code:
+            out.append({"file": path, "code": code, "action": "edited"})
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # git (universal — works with ANY editor/agent, triggers on commit)
 # --------------------------------------------------------------------------- #
 def _git(cwd: str, *args: str) -> str:
@@ -464,12 +526,13 @@ _ADAPTERS = {
     "copilot": CopilotAdapter,
     "gemini": GeminiAdapter,
     "antigravity": AntigravityAdapter,
+    "codex": CodexAdapter,
     "git": GitAdapter,
     "generic": GenericAdapter,
 }
 
 # Harnesses whose installer pins `--source`, i.e. everything buffered.
-BUFFERED_SOURCES = ("kiro", "cursor", "copilot", "gemini", "antigravity")
+BUFFERED_SOURCES = ("kiro", "cursor", "copilot", "gemini", "antigravity", "codex")
 
 
 def write_tools_for(source: str) -> tuple[str, ...]:

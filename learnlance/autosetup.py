@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -46,6 +47,12 @@ def _antigravity_marker(cwd):
     # falls back to ~/.gemini/config/, being Gemini CLI's successor.
     return ((Path(cwd) / ".agents").is_dir()
             or (Path.home() / ".gemini" / "config").is_dir())
+
+
+def _codex_marker(cwd):
+    return ((Path(cwd) / ".codex").is_dir()
+            or (Path.home() / ".codex").is_dir()
+            or shutil.which("codex") is not None)
 
 
 def _git_marker(cwd):
@@ -98,6 +105,12 @@ HARNESSES = {
         "config": lambda cwd: install.antigravity_hooks_path(cwd),
         "install": lambda cwd, in_chat=False: install.install_antigravity_hook(
             cwd, in_chat),
+    },
+    "codex": {
+        "label": "OpenAI Codex",
+        "detect": _codex_marker,
+        "config": lambda cwd: install.codex_hooks_path(cwd),
+        "install": lambda cwd, in_chat=False: install.install_codex_hook(cwd, in_chat),
     },
     "git": {
         "label": "git commit",
@@ -190,9 +203,6 @@ def run(cwd: str | None = None, force: bool = False,
     the six hooks are *per-project*, so `learnlance setup` must be able to
     configure a new project regardless of it.
     """
-    if not force and not needs_setup():
-        return []
-
     cwd = cwd or os.getcwd()
     actions: list[str] = []
 
@@ -219,6 +229,8 @@ def run(cwd: str | None = None, force: bool = False,
         except Exception as e:
             config.log(f"[autosetup] {name} hook failed: {e!r}")
 
-    # Mark done even on partial failure — the user can always install manually.
+    # Keep this flag for compatibility/diagnostics, but do not use it as a gate:
+    # auto-setup must also work when the user moves to a new project after the
+    # first invocation.
     mark_done()
     return actions

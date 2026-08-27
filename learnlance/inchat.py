@@ -235,11 +235,11 @@ def followup_output(source: str, prompt: str) -> dict | None:
     """
     if source == "cursor":
         return {"followup_message": prompt}
-    if source in ("copilot", "antigravity"):
+    if source in ("copilot", "antigravity", "codex"):
         return {"decision": "block", "reason": prompt}
     if source == "gemini":
         return {"decision": "deny", "reason": prompt}
     return None
 
 
-SUPPORTED = ("cursor", "copilot", "gemini", "antigravity", "kiro")
+SUPPORTED = ("cursor", "copilot", "gemini", "antigravity", "kiro", "codex")
