@@ -220,7 +220,11 @@ def run(cwd: str | None = None, force: bool = False,
         spec = HARNESSES[name]
         try:
             # When forced, reinstall even if present — the mode may have changed.
-            if hook_present(name, cwd) and not force:
+            # Reconcile mode automatically: a first run may have installed a
+            # normal hook before the user selected in-chat fallback, and vice
+            # versa. Do not leave a valid-but-wrong-mode hook in place.
+            if (hook_present(name, cwd) and not force
+                    and hook_in_chat(name, cwd) == in_chat):
                 continue
             result = spec["install"](cwd, in_chat)
             # Installers return a human-readable string; log it, summarize short.

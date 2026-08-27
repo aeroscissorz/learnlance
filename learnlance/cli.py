@@ -516,13 +516,16 @@ def main(argv=None) -> int:
             pass
 
     # Auto-setup: on the first CLI invocation after pip install, detect which
-    # harnesses are in use and install their hooks. Never fails loudly.
+    # harnesses are in use and install their hooks. If no external LLM CLI is
+    # configured, prefer the active agent's own in-chat analysis path so
+    # `pip install` followed by `learnlance config` is enough to get started.
+    # Never fails loudly.
     try:
-        if autosetup.needs_setup():
-            actions = autosetup.run()
-            if actions:
-                print("learnlance: configured hooks for " + ", ".join(actions))
-                print("  (run `learnlance doctor` to check status)\n")
+        auto_in_chat = not insights.resolve_backend(config.load_config())
+        actions = autosetup.run(in_chat=auto_in_chat)
+        if actions:
+            print("learnlance: configured hooks for " + ", ".join(actions))
+            print("  (run `learnlance doctor` to check status)\n")
     except Exception:
         pass  # never block the CLI over autosetup
 

@@ -73,6 +73,23 @@ active agent environments and installs missing project hooks. This also works
 when you move to a new project after the first setup; no separate setup command
 is required.
 
+The zero-configuration path is:
+
+```bash
+pip install learnlance-univ
+learnlance config
+```
+
+If no external LLM CLI is configured, supported agents are automatically set up
+to analyze in-chat. If an LLM CLI is already available, LearnLance uses it as
+the analysis backend instead.
+
+### Try the UX demo
+
+Open `examples/ux_demo.html` in a browser, then ask Codex to improve its toast
+notification UX or accessibility. The edit will exercise LearnLance's Codex
+hook without changing the package itself.
+
 ### Add a concept Claude missed
 
 ```bash

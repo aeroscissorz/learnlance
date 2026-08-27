@@ -103,6 +103,14 @@ def test_setup_enables_and_then_disables_in_chat(kiro_project, home):
         "re-running without the flag must revert the mode, not leave it stale")
 
 
+def test_auto_setup_reconciles_an_existing_hook_to_in_chat(kiro_project, home):
+    cwd = str(kiro_project)
+    autosetup.run(cwd, force=True, in_chat=False)
+    assert autosetup.hook_in_chat("kiro", cwd) is False
+    autosetup.run(cwd, in_chat=True)
+    assert autosetup.hook_in_chat("kiro", cwd) is True
+
+
 def test_each_project_gets_its_own_hook_files(tmp_path, home):
     a, b = tmp_path / "a", tmp_path / "b"
     for p in (a, b):
