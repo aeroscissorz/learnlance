@@ -68,6 +68,10 @@ def merge_result(cfg: dict, event: CodeEvent, result: dict,
     output rejoins the normal pipeline.
     """
     tag = f"{event.source}:{event.session[:8]}"
+    # In-chat answers bypass insights.generate, so apply the same grounding
+    # policy here before anything can reach graph.update().
+    result = dict(result or {})
+    result["topics"] = insights._ground_topics(result, event.blob or "")
     if not result or not result.get("topics"):
         # Nothing learnable is a real answer, not a failure — drop the buffer so
         # the same code isn't re-analyzed every turn.

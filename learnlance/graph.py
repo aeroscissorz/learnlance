@@ -3,10 +3,9 @@ relationships between them. Stored as a single JSON file so it's easy to inspect
 back up, or version.
 
 Connectivity model — how the graph stays "one connected web" instead of islands:
-  * related    : the model names adjacent/umbrella concepts for each topic. If a
-                 related concept isn't a node yet we add a light placeholder;
-                 when you later actually learn it, the placeholder is upgraded in
-                 place, so separately-learned clusters fuse at that shared node.
+  * related    : the model names adjacent concepts for each topic. Related names
+                 are linked only when they are already real learned nodes; this
+                 prevents speculative concepts from polluting the graph.
   * co-occurs  : concepts learned in the same turn are linked.
   * shared-tag : every concept carries tags; a new concept links to EXISTING
                  concepts (from any past session) that share a tag. This is what
@@ -241,15 +240,15 @@ def update(graph: dict, insights: dict, context: dict) -> list[str]:
 
         touched_ids.append(nid)
 
-        # 1) explicit related concepts (create light placeholders as needed)
+        # 1) explicit related concepts. Never create a node from a suggestion
+        # alone: only concepts evidenced by a real turn may enter the graph.
         for rel in t.get("related", []) or []:
             rname = (rel or "").strip()
             if not rname:
                 continue
             rid = slug(rname)
-            if rid not in graph["nodes"]:
-                graph["nodes"][rid] = _placeholder(rid, rname, when)
-            _link(graph, nid, rid, "related")
+            if rid in graph["nodes"] and not graph["nodes"][rid].get("placeholder"):
+                _link(graph, nid, rid, "related")
 
         # 2) shared-tag links to EXISTING concepts across all past sessions
         linked_this_node: set[str] = set()

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -58,6 +59,11 @@ SCHEMA_HINT = """Return JSON in exactly this shape:
 }
 Rules:
 - Include at most {max_topics} topics, most important first.
+- Include a topic only when it is both useful to learn and evidenced by the
+  supplied code or the user's request. Do not teach generic facts about the
+  language, framework, or UI unless this change uses that specific technique.
+- Use `why_here` to name the exact code token, API, file, or behavior that proves
+  the topic is present. If you cannot point to evidence, omit the topic.
 - "tags": 2-5 SHORT lowercase kebab-case connective keywords (broad themes this
   concept belongs to, e.g. "concurrency", "caching", "http", "state-management").
   Reuse the SAME tag wording for the same theme every time so concepts across
@@ -89,9 +95,52 @@ def _build_prompt(cfg: dict, code_blob: str) -> str:
     )
 
 
-def _finalize(result: dict, cfg: dict) -> dict:
+_GROUNDING_STOPWORDS = {
+    "about", "after", "agent", "already", "being", "code", "coding", "does",
+    "file", "files", "from", "function", "generic", "implemented", "into",
+    "just", "project", "provided", "that", "this", "through", "used", "using",
+    "user", "with", "work", "worked", "write", "written",
+}
+_GENERIC_TOPICS = {
+    "code", "coding", "programming", "software", "function", "file", "files",
+    "component", "components", "user interface", "ui", "javascript", "python",
+    "html", "css", "frontend", "backend",
+}
+
+
+def _meaningful_tokens(value: str) -> set[str]:
+    return {
+        token for token in re.findall(r"[a-z][a-z0-9_-]{3,}", (value or "").lower())
+        if token not in _GROUNDING_STOPWORDS
+    }
+
+
+def _ground_topics(result: dict, evidence: str) -> list[dict]:
+    """Keep only useful topics with concrete evidence in this turn."""
+    if not evidence:
+        return result.get("topics", []) or []
+    evidence_tokens = _meaningful_tokens(evidence)
+    grounded = []
+    for topic in result.get("topics", []) or []:
+        if not isinstance(topic, dict):
+            continue
+        name = (topic.get("name") or "").strip()
+        if not name or name.lower() in _GENERIC_TOPICS:
+            continue
+        name_tokens = _meaningful_tokens(name)
+        why_tokens = _meaningful_tokens(topic.get("why_here", ""))
+        # Exact topic words are ideal. If the concept is represented by an API
+        # or behavior instead (e.g. Accessibility -> aria-label), its evidence
+        # citation must still overlap the actual code.
+        if ((name_tokens & evidence_tokens)
+                or (why_tokens & evidence_tokens)):
+            grounded.append(topic)
+    return grounded
+
+
+def _finalize(result: dict, cfg: dict, evidence: str = "") -> dict:
     max_topics = int(cfg.get("max_topics_per_turn", 5))
-    result["topics"] = (result.get("topics", []) or [])[:max_topics]
+    result["topics"] = _ground_topics(result, evidence)[:max_topics]
     result.setdefault("did", "")
     return result
 
@@ -197,7 +246,7 @@ def _run_cli(cfg: dict, prompt: str) -> str:
 def generate(cfg: dict, code_blob: str) -> dict:
     """Extract learnable insights from code. Returns {"did": str, "topics": [...]}."""
     result = _extract_json(_run_cli(cfg, _build_prompt(cfg, code_blob)))
-    return _finalize(result, cfg)
+    return _finalize(result, cfg, code_blob)
 
 
 # --------------------------------------------------------------------------- #
@@ -227,6 +276,6 @@ def add_concept(cfg: dict, topic: str, code_blob: str) -> dict:
     prompt = _build_add_prompt(topic, code_blob)
     text = _run_cli(cfg, prompt)
     result = _extract_json(text)
-    result["topics"] = (result.get("topics", []) or [])[:3]
+    result = _finalize(result, {"max_topics_per_turn": 3}, code_blob)
     result.setdefault("did", f"Manually added '{topic}'.")
     return result

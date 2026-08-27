@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from learnlance import cli, config, inchat, insights
+from learnlance import cli, config, graph, inchat, insights
 
 REPO = Path(__file__).resolve().parent.parent
 LAUNCHER = REPO / "learnlance_hook.py"
@@ -180,6 +180,31 @@ def test_a_real_cli_is_invoked_over_stdin(cfg, fake_llm):
     got = insights.generate(cfg, "FILE app/delta.py (created):\ndef delta(): ...")
     assert got["topics"][0]["name"] == "Delta encoding"
     assert got["topics"][0]["why_here"] == "saw delta"
+
+
+def test_only_grounded_useful_topics_survive_finalization():
+    result = {"topics": [
+        {"name": "Delta encoding", "why_here": "uses delta()"},
+        {"name": "React", "why_here": "the project uses React"},
+        {"name": "Accessibility", "why_here": "aria-label makes the button accessible"},
+        {"name": "UI", "why_here": "a UI change"},
+    ]}
+    got = insights._finalize(result, {"max_topics_per_turn": 5},
+                             "FILE app/delta.py: def delta(xs): return xs\n"
+                             "<button aria-label='Dismiss'>")
+    assert [t["name"] for t in got["topics"]] == ["Delta encoding", "Accessibility"]
+
+
+def test_related_suggestions_do_not_create_unused_graph_nodes():
+    g = graph.empty()
+    graph.update(g, {"did": "added delta", "topics": [{
+        "name": "Delta encoding", "category": "algorithm", "level": "intermediate",
+        "explanation": "Stores differences.", "why_here": "delta()",
+        "tags": ["compression"], "related": ["Data compression", "Algorithms"],
+    }]}, {"when": "now", "session": "s", "cwd": "/project", "files": []})
+    assert "delta-encoding" in g["nodes"]
+    assert "data-compression" not in g["nodes"]
+    assert "algorithms" not in g["nodes"]
 
 
 def test_json_wrapped_in_prose_or_fences_is_still_parsed():
