@@ -18,7 +18,10 @@ can't drift from the ones we know how to read.
 """
 from __future__ import annotations
 
+import functools
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +30,72 @@ from pathlib import Path
 from . import adapters, config
 
 MARK = "learnlance"  # substring used to recognize our own hook entry
+# Precise match for a command *we* wrote — one of the three forms hook_command()
+# produces. Matching the bare word "learnlance" would also match an unrelated
+# hook whose script path merely lives under a folder named learnlance*.
+# The separator class allows quotes/backslashes because these are also matched
+# against json.dumps() output, where a closing quote appears escaped as \".
+_OURS_RE = re.compile(
+    r"""learnlance(?:\.[A-Za-z]{2,3})?[\\"\s]+hook\b  # console script: learnlance[.exe]" hook
+        | learnlance_hook\.py                          # repo launcher
+        | -m[\\"\s]+learnlance\b                       # python -m learnlance hook
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+class ConfigParseError(Exception):
+    """A config file exists but isn't valid JSON.
+
+    Raised instead of silently returning {} — otherwise we would write our hook
+    into an empty dict and destroy every setting the user had in that file.
+    """
+
+
+def _read_json_safe(p: Path) -> dict:
+    """Parse a JSON config, tolerating a UTF-8 BOM.
+
+    Returns {} when the file is absent or empty. Raises ConfigParseError when it
+    exists but can't be parsed, so callers can refuse to overwrite it.
+    """
+    if not p.exists():
+        return {}
+    try:
+        # utf-8-sig strips a BOM if present (Notepad / PowerShell `>` write one).
+        raw = p.read_text(encoding="utf-8-sig")
+    except Exception as e:
+        raise ConfigParseError(f"could not read {p}: {e}") from e
+    if not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception as e:
+        raise ConfigParseError(f"{p} is not valid JSON ({e})") from e
+    if not isinstance(data, dict):
+        raise ConfigParseError(f"{p} does not contain a JSON object")
+    return data
+
+
+def _write_json_atomic(p: Path, data: dict) -> None:
+    """Write JSON via a temp file + replace, so an interrupted write can never
+    leave the user's config truncated."""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".learnlance-tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def _guard(fn):
+    """Turn a refused-to-clobber situation into a clear message, never a wipe."""
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        except ConfigParseError as e:
+            return (f"Refusing to touch that config: {e}\n"
+                    "  Fix or move the file, then re-run — learnlance will not "
+                    "overwrite settings it can't read.")
+    return wrapper
 GIT_MARK = "learnlance-post-commit"  # marker line inside the git hook script
 KIRO_MARK = "learnlance-kiro"  # identifier for the Kiro hook file
 KIRO_HOOK_FILENAME = "learnlance.json"  # hook file name inside .kiro/hooks/
@@ -58,48 +127,57 @@ def hook_command() -> str:
 
 
 def _load_settings(p: Path) -> dict:
-    if p.exists():
-        try:
-            return json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
+    return _read_json_safe(p)
 
 
+def _group_is_ours(group) -> bool:
+    """True if a Claude `Stop` matcher-group is one we wrote. Tolerates junk
+    entries (a non-dict group) instead of raising AttributeError."""
+    if not isinstance(group, dict):
+        return False
+    inner = group.get("hooks")
+    if not isinstance(inner, list):
+        return False
+    return any(_OURS_RE.search(h.get("command", ""))
+               for h in inner if isinstance(h, dict))
+
+
+@_guard
 def install_hook() -> str:
     p = settings_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    settings = _load_settings(p)
+    settings = _load_settings(p)  # raises rather than clobber an unreadable file
     hooks = settings.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ConfigParseError(f"{p} has a non-object 'hooks' key")
     stop = hooks.setdefault("Stop", [])
+    if not isinstance(stop, list):
+        raise ConfigParseError(f"{p} has a non-list 'hooks.Stop' key")
 
     cmd = hook_command()
     # Remove any prior learnlance entries, then add fresh (idempotent).
-    for group in stop:
-        group.get("hooks", [])  # touch
-    stop[:] = [
-        g for g in stop
-        if not any(MARK in (h.get("command", "")) for h in g.get("hooks", []))
-    ]
+    stop[:] = [g for g in stop if not _group_is_ours(g)]
     stop.append({"hooks": [{"type": "command", "command": cmd}]})
 
-    p.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    _write_json_atomic(p, settings)
     return f"Installed Stop hook in {p}\n  command: {cmd}"
 
 
+@_guard
 def uninstall_hook() -> str:
     p = settings_path()
     if not p.exists():
         return "No settings.json found; nothing to remove."
     settings = _load_settings(p)
-    stop = settings.get("hooks", {}).get("Stop", [])
+    hooks = settings.get("hooks")
+    stop = hooks.get("Stop") if isinstance(hooks, dict) else None
+    if not isinstance(stop, list) or not stop:
+        return f"No learnlance hook found in {p}; nothing to remove."
     before = len(stop)
-    stop[:] = [
-        g for g in stop
-        if not any(MARK in (h.get("command", "")) for h in g.get("hooks", []))
-    ]
-    p.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-    return f"Removed {before - len(stop)} learnlance hook entr(y/ies) from {p}"
+    stop[:] = [g for g in stop if not _group_is_ours(g)]
+    removed = before - len(stop)
+    if removed:
+        _write_json_atomic(p, settings)
+    return f"Removed {removed} learnlance hook entr(y/ies) from {p}"
 
 
 # --------------------------------------------------------------------------- #
@@ -132,7 +210,10 @@ def install_git_hook(repo: str) -> str:
                 f"Refusing to overwrite it. Add this line to it manually:\n"
                 f"  {_git_hook_body().splitlines()[-1]}")
 
-    target.write_text(_git_hook_body(), encoding="utf-8")
+    # newline="\n" is essential: the default translates \n -> \r\n on Windows,
+    # which turns the shebang into `/bin/sh\r` and can break execution in
+    # git's bundled shell.
+    target.write_text(_git_hook_body(), encoding="utf-8", newline="\n")
     try:
         target.chmod(0o755)  # no-op semantics on Windows; git still runs it
     except Exception:
@@ -182,24 +263,25 @@ def _matcher_for(source: str) -> str:
 
 
 def _read_json(p: Path) -> dict:
-    if p.exists():
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
-    return {}
+    # Raises ConfigParseError on an unreadable file; every public installer is
+    # wrapped in @_guard, so the user gets a refusal instead of a wiped config.
+    return _read_json_safe(p)
 
 
 def _write_json(p: Path, data: dict) -> None:
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _write_json_atomic(p, data)
 
 
 def _is_ours(entry) -> bool:
-    """True if a hook entry is one we wrote (checked before we replace it)."""
-    return MARK in json.dumps(entry)
+    """True if a hook entry is one we wrote (checked before we replace it).
+
+    Matches the learnlance *invocation*, not the bare word, so a third-party
+    hook that merely lives under a path containing "learnlance" is left alone.
+    """
+    try:
+        return bool(_OURS_RE.search(json.dumps(entry)))
+    except Exception:
+        return False
 
 
 def _merge_event(hooks: dict, event: str, entry: dict) -> None:

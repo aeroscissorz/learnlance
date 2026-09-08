@@ -17,9 +17,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import config, install
+from . import config, inchat, install
 
 _SETUP_FLAG = "auto_setup_done"
+_OPTOUT_FLAG = "auto_setup_opted_out"  # set by `uninstall`, cleared by install/setup
 
 
 # --------------------------------------------------------------------------- #
@@ -194,6 +195,21 @@ def mark_done() -> None:
     config.save_config(cfg)
 
 
+def opted_out() -> bool:
+    """True once the user has explicitly uninstalled.
+
+    Without this, the implicit auto-setup re-installs on the very next command
+    and `learnlance uninstall` can never stick.
+    """
+    return bool(config.load_config().get(_OPTOUT_FLAG, False))
+
+
+def set_opted_out(value: bool) -> None:
+    cfg = config.load_config()
+    cfg[_OPTOUT_FLAG] = bool(value)
+    config.save_config(cfg)
+
+
 def run(cwd: str | None = None, force: bool = False,
         in_chat: bool = False) -> list[str]:
     """Install hooks for every harness we can detect here.
@@ -205,6 +221,13 @@ def run(cwd: str | None = None, force: bool = False,
     """
     cwd = cwd or os.getcwd()
     actions: list[str] = []
+
+    # An explicit `uninstall` wins over the implicit run. `force` (i.e. the user
+    # ran `setup`/`install` on purpose) clears the opt-out.
+    if opted_out():
+        if not force:
+            return []
+        set_opted_out(False)
 
     # Claude Code's hook is user-level, so install it regardless — it's the
     # original use case and costs nothing when Claude Code isn't present.
@@ -223,9 +246,16 @@ def run(cwd: str | None = None, force: bool = False,
             # Reconcile mode automatically: a first run may have installed a
             # normal hook before the user selected in-chat fallback, and vice
             # versa. Do not leave a valid-but-wrong-mode hook in place.
-            if (hook_present(name, cwd) and not force
-                    and hook_in_chat(name, cwd) == in_chat):
-                continue
+            #
+            # Only compare modes for harnesses that can actually *record* one.
+            # git has no in-chat mode, so hook_in_chat() is permanently False
+            # there; comparing it to in_chat=True re-installed the hook (and
+            # re-announced it) on every single invocation.
+            if hook_present(name, cwd) and not force:
+                if name not in inchat.SUPPORTED:
+                    continue  # no in-chat mode to reconcile (e.g. git)
+                if hook_in_chat(name, cwd) == in_chat:
+                    continue
             result = spec["install"](cwd, in_chat)
             # Installers return a human-readable string; log it, summarize short.
             config.log(f"[autosetup] {result}")

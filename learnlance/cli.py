@@ -32,13 +32,15 @@ def _selected_harnesses(args) -> list[str]:
 def _cmd_install(args):
     chosen = _selected_harnesses(args)
     in_chat = getattr(args, "in_chat", False)
+    # An explicit install is consent: undo any previous `uninstall` opt-out.
+    autosetup.set_opted_out(False)
     if chosen:
         project = os.path.abspath(args.path or os.getcwd())
         unsupported = [n for n in chosen if in_chat and n not in inchat.SUPPORTED]
         if unsupported:
-            print(f"--in-chat isn't available for: {', '.join(unsupported)}")
-            print("Supported: " + ", ".join(inchat.SUPPORTED))
-            return
+            # Apply --in-chat where it works rather than refusing the whole batch.
+            print(f"--in-chat isn't available for: {', '.join(unsupported)}"
+                  f" — installing those in normal mode.")
         for name in chosen:
             fn = getattr(install, _INSTALLERS[name][0])
             print(fn(project, in_chat) if name in inchat.SUPPORTED else fn(project))
@@ -67,7 +69,11 @@ def _cmd_uninstall(args):
         for name in chosen:
             print(getattr(install, _INSTALLERS[name][1])(project))
         return
+    # A bare `uninstall` means "stop doing this": record it, or the implicit
+    # auto-setup would re-install everything on the very next command.
+    autosetup.set_opted_out(True)
     print(install.uninstall_hook())
+    print("\nAuto-setup disabled. Run `learnlance setup` (or `install`) to re-enable.")
 
 
 def _cmd_setup(args):
@@ -505,6 +511,10 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# Commands that must never trigger the implicit auto-setup (see main()).
+_NO_AUTOSETUP = frozenset({"hook", "_worker", "install", "uninstall", "setup"})
+
+
 def main(argv=None) -> int:
     # Windows consoles often default to cp1252, which can't encode the ✓/•/🧠
     # glyphs we print — that raises UnicodeEncodeError and crashes the command.
@@ -515,22 +525,31 @@ def main(argv=None) -> int:
         except Exception:
             pass
 
-    # Auto-setup: on the first CLI invocation after pip install, detect which
-    # harnesses are in use and install their hooks. If no external LLM CLI is
-    # configured, prefer the active agent's own in-chat analysis path so
-    # `pip install` followed by `learnlance config` is enough to get started.
-    # Never fails loudly.
-    try:
-        auto_in_chat = not insights.resolve_backend(config.load_config())
-        actions = autosetup.run(in_chat=auto_in_chat)
-        if actions:
-            print("learnlance: configured hooks for " + ", ".join(actions))
-            print("  (run `learnlance doctor` to check status)\n")
-    except Exception:
-        pass  # never block the CLI over autosetup
-
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Auto-setup: detect which harnesses are in use here and install their
+    # hooks, so moving to a new project needs no extra step. If no external LLM
+    # CLI is configured, prefer the active agent's own in-chat analysis path.
+    #
+    # Deliberately AFTER arg parsing, and skipped for some commands:
+    #   * hook/_worker — the hook path has its own gated autosetup, and anything
+    #     printed here would land on the harness's stdout JSON channel.
+    #   * install/setup — they run their own setup explicitly (force=True).
+    #   * uninstall — re-installing what the user just removed is never right.
+    # Output goes to stderr for the same stdout-channel reason. Never fails loudly.
+    if getattr(args, "cmd", None) not in _NO_AUTOSETUP:
+        try:
+            auto_in_chat = not insights.resolve_backend(config.load_config())
+            actions = autosetup.run(in_chat=auto_in_chat)
+            if actions:
+                print("learnlance: configured hooks for " + ", ".join(actions),
+                      file=sys.stderr)
+                print("  (run `learnlance doctor` to check status)\n",
+                      file=sys.stderr)
+        except Exception:
+            pass  # never block the CLI over autosetup
+
     if not getattr(args, "func", None):
         parser.print_help()
         return 0
