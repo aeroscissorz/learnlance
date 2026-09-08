@@ -38,9 +38,19 @@ def _terms(topic: str) -> list[str]:
 
 def _iter_files(root: Path):
     # os.walk-style traversal with in-place dir pruning.
+    # `seen` holds resolved directory paths: p.is_dir() follows symlinks, so a
+    # link pointing at an ancestor would otherwise make this loop forever.
     stack = [root]
+    seen: set[str] = set()
     while stack:
         d = stack.pop()
+        try:
+            key = str(d.resolve())
+        except OSError:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
         try:
             entries = list(d.iterdir())
         except (OSError, PermissionError):
@@ -54,6 +64,22 @@ def _iter_files(root: Path):
                     yield p
             except OSError:
                 continue
+
+
+def _hit_lines(low: list[str], terms: list[str], strict: bool = True) -> list[int]:
+    """Line indices matching `terms`.
+
+    `strict` requires every term on the same line (or the phrase as written);
+    otherwise any single term is enough. See `gather` for why the choice is made
+    across the whole tree rather than per file.
+    """
+    if not terms:
+        return []
+    if strict and len(terms) > 1:
+        phrase = " ".join(terms)
+        return [i for i, ln in enumerate(low)
+                if phrase in ln or all(t in ln for t in terms)]
+    return [i for i, ln in enumerate(low) if any(t in ln for t in terms)]
 
 
 def _merge_ranges(indices: list[int], ctx: int, n: int) -> list[tuple[int, int]]:
@@ -77,6 +103,21 @@ def gather(topic: str, root: str | Path, max_chars: int = 14000,
     """
     root = Path(root)
     terms = _terms(topic)
+
+    # Two passes, because precision has to be decided across the whole tree, not
+    # per file: `add "delta encoding"` should not pull in every file mentioning
+    # "encoding" just because that file has no line containing both words. Only
+    # if *nothing* anywhere matches all the terms do we widen to any-term.
+    blob, files = _scan(root, terms, strict=True, max_chars=max_chars,
+                        ctx=ctx, max_files=max_files)
+    if files or len(terms) < 2:
+        return blob, files
+    return _scan(root, terms, strict=False, max_chars=max_chars,
+                 ctx=ctx, max_files=max_files)
+
+
+def _scan(root: Path, terms: list[str], strict: bool, max_chars: int,
+          ctx: int, max_files: int) -> tuple[str, list[str]]:
     chunks: list[str] = []
     files_hit: list[str] = []
     total = 0
@@ -92,7 +133,7 @@ def gather(topic: str, root: str | Path, max_chars: int = 14000,
             continue
         lines = text.splitlines()
         low = [ln.lower() for ln in lines]
-        hits = [i for i, ln in enumerate(low) if any(t in ln for t in terms)]
+        hits = _hit_lines(low, terms, strict=strict)
         if not hits:
             continue
         try:

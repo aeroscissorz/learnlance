@@ -102,6 +102,10 @@ class ClaudeAdapter(HookAdapter):
 # Where a file path might live in a tool's arguments, across harnesses.
 _PATH_FIELDS = ("path", "file_path", "filePath", "notebook_path", "absolute_path")
 
+#: Injected by `hook.run_hook` when the hook was registered with `--end`. Named
+#: with a leading underscore so it can't collide with a harness's own field.
+PHASE_KEY = "_learnlance_phase"
+
 
 def _is_learnlance_file(path: str) -> bool:
     """True for paths inside our own storage.
@@ -192,7 +196,7 @@ class BufferedToolAdapter(HookAdapter):
         if edits:
             return self._record(session, cwd, edits, self.read_prompt(payload))
 
-        if event_name in self.end_events or not event_name:
+        if self.is_end_of_turn(payload, event_name):
             # Some harnesses only reveal the user's request on the end-of-turn
             # payload (Gemini's AfterAgent), so read it here too rather than
             # relying solely on what capture-time payloads happened to carry.
@@ -200,6 +204,28 @@ class BufferedToolAdapter(HookAdapter):
 
         return CodeEvent(self.source, event_name or "tool_use", cwd, session,
                          skip_reason=f"{event_name or 'payload'} carried no new code")
+
+    def is_end_of_turn(self, payload: dict, event_name: str) -> bool:
+        """Should this payload drain the buffer and trigger analysis?
+
+        Draining is expensive (one LLM call) and destructive (the buffer is
+        cleared), so we only do it when we're reasonably sure the turn ended:
+
+        1. `--end` on our own hook command — authoritative, since we wrote it.
+        2. A documented end-of-turn event name.
+        3. No event name AND no tool name: not a tool call, so most likely a
+           turn boundary from a harness that omits the field.
+
+        The case this deliberately excludes is a *tool* payload with a missing
+        event name. VS Code Copilot ignores hook matchers and fires us for every
+        tool call; treating those as end-of-turn spent an LLM call per tool call
+        and wiped the buffer mid-turn.
+        """
+        if payload.get(PHASE_KEY) == "end":
+            return True
+        if event_name:
+            return event_name in self.end_events
+        return not self.read_tool(payload)
 
     def _record(self, session, cwd, edits, prompt):
         n = 0
@@ -418,10 +444,23 @@ class CodexAdapter(BufferedToolAdapter):
         if tool not in self.write_tools:
             return []
         args = self.read_tool_input(payload)
-        patch = _first(args, "command", "patch", "input", "content", default="")
-        if not isinstance(patch, str) or not patch:
+
+        patch = _first(args, "command", "patch", "input", default="")
+        if isinstance(patch, str) and patch:
+            edits = _codex_patch_edits(patch)
+            if edits:
+                return edits
+
+        # Not apply-patch syntax. Codex also accepts Edit/Write shaped like every
+        # other harness (a path plus content), and routing those through the
+        # patch parser dropped them silently — it returns [] for anything without
+        # `*** Add File:` markers.
+        code = _first(args, "content", "new_string", "newStr", "text", default="")
+        if not isinstance(code, str) or not code:
             return []
-        return _codex_patch_edits(patch)
+        path = _first(args, *_PATH_FIELDS, default="?")
+        return [{"file": str(path), "code": code,
+                 "action": "created" if tool == "Write" else "edited"}]
 
 
 def _codex_patch_edits(patch: str) -> list[dict]:

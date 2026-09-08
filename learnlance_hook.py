@@ -27,4 +27,6 @@ if __name__ == "__main__":
     else:
         # --source pins the adapter (e.g. Kiro). Must be forwarded, or the
         # payload can't be routed and the hook silently does nothing.
-        run_hook(_arg("--source"), "--in-chat" in sys.argv)
+        # --end marks the end-of-turn hook; without it this launcher's hooks
+        # would have to infer the phase from the payload.
+        run_hook(_arg("--source"), "--in-chat" in sys.argv, "--end" in sys.argv)

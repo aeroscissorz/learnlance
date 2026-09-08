@@ -83,6 +83,8 @@ Write ONLY a JSON file to this exact path (create the directory if needed):
 
     {path}
 
+If a file is already there, add a number to the name (concepts2.json, ...).
+
 with this shape:
 
 {{
@@ -114,8 +116,15 @@ Write the file and stop. No commentary, no summary of this instruction.
 """
 
 
+#: A concrete, legal filename. This used to be "concepts-<n>.json", but `<` and
+#: `>` are reserved characters on Windows, so an agent that followed the "write to
+#: this exact path" instruction literally got a filesystem error. `ingest()` globs
+#: the inbox, so the exact name doesn't matter — only that it's writable.
+INBOX_FILENAME = "concepts.json"
+
+
 def build_prompt(cfg: dict) -> str:
-    target = inbox_dir() / "concepts-<n>.json"
+    target = inbox_dir() / INBOX_FILENAME
     return PROMPT.format(path=target,
                          max_topics=int(cfg.get("max_topics_per_turn", 5)))
 

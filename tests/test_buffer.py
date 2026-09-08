@@ -54,10 +54,26 @@ def test_session_ids_are_made_filename_safe(home):
     assert pending.load(weird)["edits"] == [_edit()]
 
 
-def test_corrupt_buffer_degrades_to_empty_rather_than_raising(home):
+def test_corrupt_record_is_skipped_rather_than_raising(home):
+    """Each edit is its own file, so corruption costs that edit — not the turn.
+
+    (Under the old single-document buffer, one bad byte discarded everything.)
+    """
     pending.add_edit("bad", _edit())
-    pending.path_for("bad").write_text("{not json", encoding="utf-8")
-    assert pending.load("bad") == {"cwd": "", "edits": [], "prompt": ""}
+    (pending.path_for("bad") / "00000000000000000001-x-deadbeef.json").write_text(
+        "{not json", encoding="utf-8")
+
+    data = pending.load("bad")
+
+    assert len(data["edits"]) == 1, "the good edit should have survived"
+    assert data["edits"][0]["file"] == _edit()["file"]
+
+
+def test_a_buffer_with_nothing_readable_loads_as_empty(home):
+    pending.add_edit("allbad", _edit())
+    for f in pending.path_for("allbad").glob("*.json"):
+        f.write_text("{not json", encoding="utf-8")
+    assert pending.load("allbad") == {"cwd": "", "edits": [], "prompt": ""}
 
 
 def test_buffer_survives_across_separate_hook_invocations(home):

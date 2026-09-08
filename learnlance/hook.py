@@ -52,7 +52,8 @@ def _save_state(state: dict) -> None:
     config.STATE_PATH.write_text(json.dumps(state), encoding="utf-8")
 
 
-def run_hook(source: str | None = None, in_chat: bool = False) -> None:
+def run_hook(source: str | None = None, in_chat: bool = False,
+             end: bool = False) -> None:
     """Invoked as `learnlance hook` from a harness's hook config.
 
     `source` (from `--source`) pins which adapter handles the payload. Harnesses
@@ -61,6 +62,9 @@ def run_hook(source: str | None = None, in_chat: bool = False) -> None:
 
     `in_chat` (from `--in-chat`) asks the agent to do the analysis rather than
     shelling out to an LLM CLI. See inchat.py.
+
+    `end` (from `--end`) says this is the end-of-turn hook. We write the hook
+    config, so the phase is stated rather than inferred from payload shape.
     """
     # Re-entry guard: the CLI backend launches a headless `claude`, which fires
     # its own Stop hook. Bail immediately so we never recurse.
@@ -80,6 +84,8 @@ def run_hook(source: str | None = None, in_chat: bool = False) -> None:
         payload = {}
     if source:
         payload["source"] = source
+    if end:
+        payload[adapters.PHASE_KEY] = "end"
 
     cfg = config.load_config()
     if not cfg.get("enabled", True):
@@ -95,6 +101,12 @@ def run_hook(source: str | None = None, in_chat: bool = False) -> None:
     if event is None or event.skip_reason:
         if event is not None:
             config.log(f"[{_now()}] {event.source}:{event.session[:8]}: {event.skip_reason}")
+        # In-chat: an answer the agent already wrote must still be collected on a
+        # turn that produced no new code of its own. Otherwise the reply sat in
+        # the inbox until some later turn happened to have edits, and got filed
+        # against that turn's files instead.
+        if in_chat and event is not None and end:
+            _ingest_pending_answer(cfg, event)
         return
 
     # In-chat mode never calls an LLM itself — it asks the agent, and prints the
@@ -108,6 +120,28 @@ def run_hook(source: str | None = None, in_chat: bool = False) -> None:
         _spawn_worker(event)
     else:
         core.process_event(cfg, event)
+
+
+def _ingest_pending_answer(cfg: dict, event: CodeEvent) -> None:
+    """Collect an in-chat answer without asking for a new one.
+
+    Used on end-of-turn events that carried no analyzable code: there's nothing
+    to ask about, but a previous ask may still be waiting in the inbox.
+    """
+    try:
+        result = inchat.ingest()
+        if result is None:
+            return
+        core.merge_result(cfg, event, result, announce=False)
+        state = _load_state()
+        inchat.clear_asks(state, event.session)
+        _save_state(state)
+        inchat.close_request()
+        config.log(f"[{_now()}] {event.source}:{event.session[:8]}: ingested "
+                   f"{len(result['topics'])} concept(s) from the agent "
+                   f"(no new code this turn)")
+    except Exception as e:
+        config.log(f"[{_now()}] in-chat ingest failed: {e!r}")
 
 
 def _handle_in_chat(cfg: dict, event: CodeEvent, payload: dict) -> None:

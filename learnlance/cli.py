@@ -390,7 +390,8 @@ def _cmd_help(args):
 
 
 def _cmd_hook(args):
-    hook.run_hook(getattr(args, "source", None), getattr(args, "in_chat", False))
+    hook.run_hook(getattr(args, "source", None), getattr(args, "in_chat", False),
+                  getattr(args, "end", False))
 
 
 def _cmd_worker(args):
@@ -503,6 +504,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="pin the adapter for this payload, e.g. kiro")
     h.add_argument("--in-chat", dest="in_chat", action="store_true",
                    help="ask the agent to analyze its own work instead of an LLM CLI")
+    h.add_argument("--end", action="store_true",
+                   help="this is the end-of-turn hook (drain the edit buffer)")
     h.set_defaults(func=_cmd_hook)
     w = sub.add_parser("_worker")
     w.add_argument("job")

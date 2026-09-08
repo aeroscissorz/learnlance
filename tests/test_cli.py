@@ -25,22 +25,23 @@ LAUNCHER = REPO / "learnlance_hook.py"
 def test_hook_forwards_source_and_in_chat(monkeypatch):
     seen = {}
     monkeypatch.setattr(cli.hook, "run_hook",
-                        lambda source=None, in_chat=False: seen.update(
-                            source=source, in_chat=in_chat))
+                        lambda source=None, in_chat=False, end=False: seen.update(
+                            source=source, in_chat=in_chat, end=end))
 
-    cli.build_parser().parse_args(["hook", "--source", "kiro", "--in-chat"]).func(
-        cli.build_parser().parse_args(["hook", "--source", "kiro", "--in-chat"]))
-    assert seen == {"source": "kiro", "in_chat": True}
+    args = cli.build_parser().parse_args(
+        ["hook", "--source", "kiro", "--in-chat", "--end"])
+    args.func(args)
+    assert seen == {"source": "kiro", "in_chat": True, "end": True}
 
 
 def test_hook_defaults_are_conservative(monkeypatch):
     seen = {}
     monkeypatch.setattr(cli.hook, "run_hook",
-                        lambda source=None, in_chat=False: seen.update(
-                            source=source, in_chat=in_chat))
+                        lambda source=None, in_chat=False, end=False: seen.update(
+                            source=source, in_chat=in_chat, end=end))
     args = cli.build_parser().parse_args(["hook"])
     args.func(args)
-    assert seen == {"source": None, "in_chat": False}
+    assert seen == {"source": None, "in_chat": False, "end": False}
 
 
 @pytest.mark.parametrize("cmd", ["setup", "install", "uninstall", "config", "show",
@@ -75,6 +76,26 @@ def test_in_chat_is_refused_for_harnesses_that_cannot_do_it(capsys, project, hom
 # --------------------------------------------------------------------------- #
 # The standalone launcher — used when the console script isn't on PATH
 # --------------------------------------------------------------------------- #
+def _buffered_edits(home_dir: Path, session: str) -> list[dict]:
+    """Edits buffered for `session` inside a subprocess's LEARNLANCE_HOME.
+
+    Reads the store directly (the subprocess has its own config paths) but
+    accepts either layout, so these tests assert behaviour rather than format.
+    """
+    session_dir = home_dir / "pending" / session
+    if session_dir.is_dir():
+        out = []
+        for f in sorted(session_dir.glob("*.json")):
+            rec = json.loads(f.read_text("utf-8"))
+            if isinstance(rec.get("edit"), dict):
+                out.append(rec["edit"])
+        return out
+    legacy = home_dir / "pending" / f"{session}.json"
+    if legacy.exists():
+        return json.loads(legacy.read_text("utf-8")).get("edits", [])
+    return []
+
+
 def _run_launcher(payload, *args, home_dir):
     env = {**dict(__import__("os").environ), "LEARNLANCE_HOME": str(home_dir)}
     return subprocess.run(
@@ -92,10 +113,10 @@ def test_launcher_forwards_source(tmp_path):
     proc = _run_launcher(payload, "--source", "kiro", home_dir=h)
     assert proc.returncode == 0, proc.stderr
 
-    buf = h / "pending" / "L1.json"
-    assert buf.exists(), (
+    edits = _buffered_edits(h, "L1")
+    assert edits, (
         f"--source was dropped before run_hook; stderr={proc.stderr[:400]}")
-    assert json.loads(buf.read_text("utf-8"))["edits"][0]["file"] == "a.py"
+    assert edits[0]["file"] == "a.py"
 
 
 def test_launcher_forwards_source_with_equals_form(tmp_path):
@@ -105,7 +126,7 @@ def test_launcher_forwards_source_with_equals_form(tmp_path):
                "tool_input": {"path": "b.py", "text": "def g():\n    return 2\n" * 4}}
     proc = _run_launcher(payload, "--source=kiro", home_dir=h)
     assert proc.returncode == 0, proc.stderr
-    assert (h / "pending" / "L2.json").exists()
+    assert _buffered_edits(h, "L2")
 
 
 def test_launcher_exits_zero_on_unusable_input(tmp_path):

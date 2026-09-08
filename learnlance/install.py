@@ -30,6 +30,12 @@ from pathlib import Path
 from . import adapters, config
 
 MARK = "learnlance"  # substring used to recognize our own hook entry
+GIT_MARK = "learnlance-post-commit"  # marker line inside the git hook script
+KIRO_MARK = "learnlance-kiro"  # identifier for the Kiro hook file
+KIRO_HOOK_FILENAME = "learnlance.json"  # hook file name inside .kiro/hooks/
+COPILOT_HOOK_FILENAME = "learnlance.json"  # hook file name inside .github/hooks/
+CODEX_HOOK_FILENAME = "hooks.json"  # shared Codex hook file inside .codex/
+
 # Precise match for a command *we* wrote — one of the three forms hook_command()
 # produces. Matching the bare word "learnlance" would also match an unrelated
 # hook whose script path merely lives under a folder named learnlance*.
@@ -96,11 +102,6 @@ def _guard(fn):
                     "  Fix or move the file, then re-run — learnlance will not "
                     "overwrite settings it can't read.")
     return wrapper
-GIT_MARK = "learnlance-post-commit"  # marker line inside the git hook script
-KIRO_MARK = "learnlance-kiro"  # identifier for the Kiro hook file
-KIRO_HOOK_FILENAME = "learnlance.json"  # hook file name inside .kiro/hooks/
-COPILOT_HOOK_FILENAME = "learnlance.json"  # hook file name inside .github/hooks/
-CODEX_HOOK_FILENAME = "hooks.json"  # shared Codex hook file inside .codex/
 
 
 def settings_path() -> Path:
@@ -247,13 +248,21 @@ def _git_hook_body() -> str:
 # --------------------------------------------------------------------------- #
 # Shared helpers for the tool-at-a-time harnesses
 # --------------------------------------------------------------------------- #
-def _source_cmd(source: str, in_chat: bool = False) -> str:
+def _source_cmd(source: str, in_chat: bool = False, end: bool = False) -> str:
     """The command a harness runs: our entrypoint with the adapter pinned.
 
     `--in-chat` only goes on the end-of-turn hook; capturing an edit is identical
     either way.
+
+    `--end` marks the end-of-turn hook explicitly. Without it we had to infer the
+    phase from the payload, and a harness that omits `hook_event_name` on a tool
+    call looked identical to end-of-turn — which drained the buffer and paid for
+    an LLM call mid-turn. The hook config is ours to write, so we state the phase
+    instead of guessing it.
     """
     cmd = f"{hook_command()} --source {source}"
+    if end:
+        cmd += " --end"
     return f"{cmd} --in-chat" if in_chat else cmd
 
 
@@ -334,7 +343,7 @@ def install_kiro_hook(project: str, in_chat: bool = False) -> str:
          "action": {"type": "command", "command": _source_cmd("kiro")}},
         {"name": f"{KIRO_MARK}: learn from the session",
          "trigger": "Stop",
-         "action": {"type": "command", "command": _source_cmd("kiro", in_chat)}},
+         "action": {"type": "command", "command": _source_cmd("kiro", in_chat, end=True)}},
     ]
     if in_chat:
         from . import inchat
@@ -397,7 +406,7 @@ def install_cursor_hook(project: str, in_chat: bool = False) -> str:
 
     _merge_event(hooks, "afterFileEdit",
                  {"command": _source_cmd("cursor"), "timeout": 30})
-    stop_entry = {"command": _source_cmd("cursor", in_chat), "timeout": 30}
+    stop_entry = {"command": _source_cmd("cursor", in_chat, end=True), "timeout": 30}
     if in_chat:
         stop_entry["loop_limit"] = 1
     _merge_event(hooks, "stop", stop_entry)
@@ -455,7 +464,7 @@ def install_copilot_hook(project: str, in_chat: bool = False) -> str:
             "PostToolUse": [{"type": "command", "command": _source_cmd("copilot"),
                              "matcher": _matcher_for("copilot"), "timeoutSec": 30}],
             "Stop": [{"type": "command",
-                      "command": _source_cmd("copilot", in_chat),
+                      "command": _source_cmd("copilot", in_chat, end=True),
                       "timeoutSec": 30}],
         },
     })
@@ -500,11 +509,14 @@ def install_codex_hook(project: str, in_chat: bool = False) -> str:
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         return f"{target} has an unexpected 'hooks' shape; leaving it alone."
-    capture = {"matcher": "apply_patch|Edit|Write", "hooks": [{
+    # Derived, not hardcoded — otherwise the tools we ask about can drift from
+    # the ones the adapter knows how to read (the guarantee in this module's
+    # docstring).
+    capture = {"matcher": _matcher_for("codex"), "hooks": [{
         "type": "command", "command": _source_cmd("codex"), "timeout": 30,
     }]}
     stop = {"hooks": [{
-        "type": "command", "command": _source_cmd("codex", in_chat), "timeout": 30,
+        "type": "command", "command": _source_cmd("codex", in_chat, end=True), "timeout": 30,
     }]}
     _merge_event(hooks, "PostToolUse", capture)
     _merge_event(hooks, "Stop", stop)
@@ -561,7 +573,7 @@ def install_gemini_hook(project: str | None = None, in_chat: bool = False) -> st
                  {"matcher": _matcher_for("gemini"),
                   "hooks": inner(_source_cmd("gemini"))})
     _merge_event(hooks, "AfterAgent",
-                 {"hooks": inner(_source_cmd("gemini", in_chat))})
+                 {"hooks": inner(_source_cmd("gemini", in_chat, end=True))})
     _write_json(target, data)
 
     out = (f"Installed Gemini CLI hooks at {target}\n"
@@ -614,7 +626,7 @@ def install_antigravity_hook(project: str, in_chat: bool = False) -> str:
                          "hooks": [{"type": "command",
                                     "command": _source_cmd("antigravity")}]}],
         "Stop": [{"hooks": [{"type": "command",
-                             "command": _source_cmd("antigravity", in_chat)}]}],
+                             "command": _source_cmd("antigravity", in_chat, end=True)}]}],
     }
     _write_json(target, data)
     out = (f"Installed Antigravity hooks at {target}\n"

@@ -215,7 +215,8 @@ def test_codex_install_and_uninstall_preserve_other_hooks(project, home):
     assert "guard.py" in json.dumps(spec["hooks"]["PreToolUse"])
     assert len(spec["hooks"]["PostToolUse"]) == 1
     assert len(spec["hooks"]["Stop"]) == 1
-    assert "--source codex --in-chat" in json.dumps(spec["hooks"]["Stop"])
+    # --end marks the end-of-turn hook so the phase is never inferred.
+    assert "--source codex --end --in-chat" in json.dumps(spec["hooks"]["Stop"])
 
     install.uninstall_codex_hook(str(project))
     spec = json.loads(path.read_text("utf-8"))
