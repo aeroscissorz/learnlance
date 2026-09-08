@@ -30,7 +30,7 @@ into (`claude`, `gemini`, `copilot`, `cursor-agent`, or `ollama`). Or use
 ## Install
 
 ```bash
-pip install learnlance-univ
+pip install learnlance
 learnlance setup
 ```
 

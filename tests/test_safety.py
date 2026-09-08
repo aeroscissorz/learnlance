@@ -105,7 +105,7 @@ def test_install_survives_a_junk_stop_entry(home, user_home):
 # only claim hooks that are actually ours
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("command", [
-    "C:/dev/learnlance-univ/.cursor/hooks/format.sh",  # path contains our name
+    "C:/dev/learnlance/.cursor/hooks/format.sh",  # path contains our name
     "C:/repos/learnlance/scripts/lint.sh",
     "npx prettier --write",
 ])

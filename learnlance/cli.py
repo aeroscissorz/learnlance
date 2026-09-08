@@ -20,7 +20,7 @@ usage:
   learnlance <command> --help
 
 Get started:
-  pip install learnlance-univ
+  pip install learnlance
   learnlance setup                  # configure this project (analyzes via an LLM CLI)
   learnlance setup --in-chat        # chat agents analyze their own work instead
   # ... then just code. `learnlance show` opens your graph.
@@ -184,7 +184,7 @@ def _cmd_doctor(args):
     ok = lambda b: "✓" if b else "✗"
 
     try:
-        ver = _md.version("learnlance-univ")  # distribution name, not the import pkg
+        ver = _md.version("learnlance")
     except Exception:
         from . import __version__ as ver  # running from source
 

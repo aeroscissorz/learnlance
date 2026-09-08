@@ -3,10 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# Distribution name (what you `pip install`). The import package below stays
-# `learnlance`, the way `pip install pillow` gives you `import PIL` — so the
-# module path, the `learnlance` command and ~/.learnlance are all unchanged.
-name = "learnlance-univ"
+name = "learnlance"
 version = "0.2.0"
 description = "Turn what AI coding agents build into a growing personal knowledge graph."
 readme = "README.md"
@@ -36,9 +33,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aeroscissorz/learnlance-univ"
-Repository = "https://github.com/aeroscissorz/learnlance-univ"
-Issues = "https://github.com/aeroscissorz/learnlance-univ/issues"
+Homepage = "https://github.com/aeroscissorz/learnlance"
+Repository = "https://github.com/aeroscissorz/learnlance"
+Issues = "https://github.com/aeroscissorz/learnlance/issues"
 
 [project.optional-dependencies]
 # The package itself stays stdlib-only; this is for running the test suite.
