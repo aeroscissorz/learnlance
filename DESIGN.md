@@ -1,5 +1,8 @@
 # learnlance — Design Document
 
+> **Superseded.** This is the original single-harness (Claude Code) design doc.
+> The current multi-harness architecture lives in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 **Version:** 0.1.0
 **Status:** implemented & installed
 **Author:** generated with Claude Code

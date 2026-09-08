@@ -45,3 +45,6 @@ projects.json
 Thumbs.db
 .idea/
 .vscode/
+
+# Command Code agent's own project config (taste, etc.) — not part of this repo.
+.commandcode/

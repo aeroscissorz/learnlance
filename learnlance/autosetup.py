@@ -5,7 +5,9 @@ first time any hook fires — so the user never has to run `learnlance install`.
 
 Detection is deliberately conservative: we look for a harness's own config
 directory, which only exists once that tool has actually run. `~/.copilot/`
-means Copilot CLI is installed; a bare `.github/` directory does not.
+means Copilot CLI is installed, and a VS Code extension under
+`~/.vscode/extensions/github.copilot*` means Copilot Chat is; a bare `.github/`
+directory proves nothing on its own.
 
 Nothing here raises. A harness we can't set up is logged and skipped.
 """
@@ -31,12 +33,50 @@ def _kiro_marker(cwd):
 
 
 def _cursor_marker(cwd):
-    return (Path(cwd) / ".cursor").is_dir() or (Path.home() / ".cursor").is_dir()
+    # Cursor's project hook file lives in .cursor/, and its user config lives in a
+    # platform-specific location. Check every known one rather than guessing the
+    # OS — a config dir proves the tool has run here, nothing more.
+    if (Path(cwd) / ".cursor").is_dir():
+        return True
+    home = Path.home()
+    candidates = (
+        home / ".cursor",
+        home / "Library" / "Application Support" / "Cursor",   # macOS
+        home / ".config" / "cursor",                            # Linux
+    )
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        candidates += (Path(appdata) / "Cursor",)               # Windows
+    return any(p.is_dir() for p in candidates)
+
+
+def copilot_surfaces() -> list[str]:
+    """Which Copilot surfaces are detectable on this machine.
+
+    Copilot CLI and VS Code Copilot Chat read the same `.github/hooks/*.json`,
+    so they share one harness entry — but they leave different user-level markers,
+    and `doctor` should be able to say which one is present.
+    """
+    surfaces = []
+    if (Path.home() / ".copilot").is_dir():
+        surfaces.append("Copilot CLI")
+    ext = Path.home() / ".vscode" / "extensions"
+    try:
+        if ext.is_dir():
+            names = {p.name.lower() for p in ext.iterdir() if p.is_dir()}
+            if any(n.startswith("github.copilot-chat-") for n in names):
+                surfaces.append("VS Code Copilot Chat")
+            elif any(n.startswith("github.copilot-") for n in names):
+                surfaces.append("VS Code Copilot")
+    except OSError:
+        pass
+    return surfaces
 
 
 def _copilot_marker(cwd):
-    # Only the user-level dir is evidence; every repo has a .github folder.
-    return (Path.home() / ".copilot").is_dir()
+    # Copilot CLI leaves ~/.copilot; VS Code Copilot lives in the VS Code
+    # extensions dir. Only user-level evidence counts — every repo has a .github.
+    return bool(copilot_surfaces())
 
 
 def _gemini_marker(cwd):

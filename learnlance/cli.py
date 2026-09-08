@@ -149,7 +149,7 @@ def _cmd_doctor(args):
     ok = lambda b: "✓" if b else "✗"
 
     try:
-        ver = _md.version("learnlance")
+        ver = _md.version("learnlance-univ")  # distribution name, not the import pkg
     except Exception:
         from . import __version__ as ver  # running from source
 
@@ -185,8 +185,13 @@ def _cmd_doctor(args):
     claude_on = autosetup.claude_hook_present()
     print(f"    {'Claude Code':15} {ok(claude_on)} "
           f"{capabilities.status('claude', claude_on, False, log)}")
+    # Copilot CLI and VS Code Copilot Chat share one hook registration, so they're
+    # one row — but the label says which surface(s) are actually present.
+    surfaces = autosetup.copilot_surfaces()
+    copilot_label = ("Copilot (" + ", ".join(surfaces) + ")"
+                     if surfaces else "Copilot / VS Code")
     for name, label in (("kiro", "Kiro"), ("cursor", "Cursor"),
-                        ("copilot", "Copilot / VS Code"), ("gemini", "Gemini CLI"),
+                        ("copilot", copilot_label), ("gemini", "Gemini CLI"),
                         ("antigravity", "Antigravity"), ("codex", "OpenAI Codex"),
                         ("git", "git commit")):
         present = autosetup.hook_present(name, here)

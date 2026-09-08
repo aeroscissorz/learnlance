@@ -186,6 +186,17 @@ requires. It's the weakest part of the design: a config directory proves the too
 was once present, not that it's installed now, which is why `setup` says "found its
 config dir" rather than claiming the tool is live.
 
+Two markers deserve spelling out because they'd otherwise be missed:
+
+- **Cursor** keeps its user config in a platform-specific location — `~/.cursor`,
+  `~/Library/Application Support/Cursor` (macOS), `~/.config/cursor` (Linux), or
+  `%APPDATA%\Cursor` (Windows). Detection checks all of them, not just `~/.cursor`.
+- **Copilot** is one harness entry but two surfaces: Copilot CLI leaves
+  `~/.copilot`, while VS Code Copilot Chat leaves an extension directory under
+  `~/.vscode/extensions/github.copilot*`. Both count, so a VS Code-only user is
+  still detected and their hook installed. `doctor` names whichever surface(s) it
+  found.
+
 The **git** adapter stays as the fallback for anything with no hook API. It
 triggers on commit, so it captures code no matter what wrote it.
 

@@ -55,6 +55,43 @@ def test_a_project_config_dir_is_detected(project, home, monkeypatch):
     assert "kiro" in autosetup.detect_harnesses(str(project))
 
 
+def test_cursor_is_detected_from_a_platform_config_dir(home, user_home, project,
+                                                       monkeypatch):
+    """Cursor's user config is platform-specific, so detection must not rely on
+    `~/.cursor` alone. `APPDATA` is cleared so the real Windows profile (which may
+    hold a real Cursor) can't leak into the sandbox."""
+    monkeypatch.delenv("APPDATA", raising=False)
+    assert "cursor" not in autosetup.detect_harnesses(str(project))
+    (user_home / ".config" / "cursor").mkdir(parents=True)
+    assert "cursor" in autosetup.detect_harnesses(str(project))
+
+
+def test_copilot_cli_is_detected(home, user_home, project):
+    assert "copilot" not in autosetup.detect_harnesses(str(project))
+    (user_home / ".copilot").mkdir()
+    assert "copilot" in autosetup.detect_harnesses(str(project))
+
+
+def test_vscode_copilot_chat_is_detected(home, user_home, project):
+    """A VS Code-only user has no ~/.copilot, so the extension dir must count."""
+    ext = user_home / ".vscode" / "extensions" / "github.copilot-chat-0.24.0"
+    ext.mkdir(parents=True)
+    assert "copilot" in autosetup.detect_harnesses(str(project))
+    assert "VS Code Copilot Chat" in autosetup.copilot_surfaces()
+
+
+def test_vscode_base_copilot_is_detected(home, user_home, project):
+    (user_home / ".vscode" / "extensions" / "github.copilot-1.0.0").mkdir(parents=True)
+    assert "copilot" in autosetup.detect_harnesses(str(project))
+    assert "VS Code Copilot" in autosetup.copilot_surfaces()
+
+
+def test_copilot_surfaces_reports_only_what_is_present(home, user_home):
+    assert autosetup.copilot_surfaces() == []
+    (user_home / ".copilot").mkdir()
+    assert autosetup.copilot_surfaces() == ["Copilot CLI"]
+
+
 def test_hook_present_is_false_before_install(kiro_project, home):
     assert autosetup.hook_present("kiro", str(kiro_project)) is False
 
