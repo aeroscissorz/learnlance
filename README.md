@@ -5,17 +5,21 @@ Turn what AI coding agents build into a growing personal knowledge graph.
 [Demo](#demo) · [Install](#install) · [Contribute](#contributing)
 
 ```
-┌───────────────────────────────────────────┐
-│                                           │
-│            YOUR LEARNING GRAPH            │
-│                                           │
-│      React ──── Hooks ──── State          │
-│         │            │                    │
-│         ├── Closure ─┴── Event Loop       │
-│         │                                 │
-│         └── Component Lifecycle           │
-│                                           │
-└───────────────────────────────────────────┘
+┌───────────────────────────────────────────────┐
+│                                               │
+│                YOUR LEARNING GRAPH            │
+│                                               │
+│    Delta encoding ──── Data synchronization   │
+│          │                   │                │
+│          └─── Compression ────┘                │
+│                  │                            │
+│                  └──────── Diffing            │
+│                                               │
+│    Debouncing ───── Idempotency keys          │
+│                                               │
+│    Topological sort ─── Graph algorithms      │
+│                                               │
+└───────────────────────────────────────────────┘
 ```
 
 You use AI to write code.
