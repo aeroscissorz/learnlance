@@ -114,11 +114,17 @@ def hook_command() -> str:
     was installed. All variants contain 'learnlance' so uninstall stays idempotent.
 
     Priority:
-      1. Installed as a package (pip/pipx) -> use the `learnlance` console script
-         by absolute path (survives PATH differences in the hook's environment).
-      2. Running from a git clone -> the repo's launcher script (no install needed).
+      1. Running from a source checkout -> the repo's launcher script, so a stale
+         pip-installed `learnlance` on PATH can't be picked over the code being
+         developed (e.g. a newer `--end` flag an old console script doesn't know).
+      2. Installed as a package (pip/pipx) -> the `learnlance` console script by
+         absolute path (survives PATH differences in the hook's environment).
       3. Fallback -> `python -m learnlance hook` with the current interpreter.
     """
+    launcher = Path(__file__).resolve().parent.parent / "learnlance_hook.py"
+    if launcher.exists():
+        prefix = "& " if os.name == "nt" else ""
+        return f'{prefix}"{sys.executable}" "{launcher}"'
     exe = shutil.which("learnlance")
     if exe:
         # VS Code/Copilot runs command hooks through PowerShell on Windows.
@@ -127,10 +133,6 @@ def hook_command() -> str:
         # an unexpected token (for example: `"...\\learnlance.EXE" hook`).
         prefix = "& " if os.name == "nt" else ""
         return f'{prefix}"{exe}" hook'
-    launcher = Path(__file__).resolve().parent.parent / "learnlance_hook.py"
-    if launcher.exists():
-        prefix = "& " if os.name == "nt" else ""
-        return f'{prefix}"{sys.executable}" "{launcher}"'
     prefix = "& " if os.name == "nt" else ""
     return f'{prefix}"{sys.executable}" -m learnlance hook'
 

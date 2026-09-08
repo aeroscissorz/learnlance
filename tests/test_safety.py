@@ -23,6 +23,10 @@ def test_windows_hook_command_uses_powershell_call_operator(monkeypatch):
     monkeypatch.setattr(install.os, "name", "nt")
     monkeypatch.setattr(install.shutil, "which",
                         lambda name: r"C:\workspaces\outbound test\venv\Scripts\learnlance.EXE")
+    # Simulate a site-packages install, where no source launcher sits alongside
+    # the package — otherwise the source-checkout path would win first.
+    monkeypatch.setattr(install, "__file__",
+                        r"C:\fake\site-packages\learnlance\install.py")
 
     assert install.hook_command() == (
         r'& "C:\workspaces\outbound test\venv\Scripts\learnlance.EXE" hook')

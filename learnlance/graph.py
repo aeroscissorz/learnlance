@@ -149,17 +149,27 @@ def _find_edge(graph: dict, a: str, b: str) -> dict | None:
     return None
 
 
-def _link(graph: dict, a: str, b: str, etype: str, tag: str | None = None) -> None:
+def _link(graph: dict, a: str, b: str, etype: str, tag: str | None = None,
+          seen: set[str] | None = None) -> None:
     if a == b or a not in graph["nodes"] or b not in graph["nodes"]:
         return
+    key = _pair_key(a, b)
     e = _find_edge(graph, a, b)
     if e is None:
         graph["edges"].append({
             "source": a, "target": b, "type": etype, "weight": 1,
             "tags": ([tag] if tag else []),
         })
+        if seen is not None:
+            seen.add(key)
         return
-    e["weight"] = e.get("weight", 1) + 1
+    # Type and tags can still upgrade on a repeat link, but weight only grows once
+    # per turn: a pair linked by `related`, `shared-tag`, and `co-occurs` in one
+    # turn is a single relationship, not three separate reinforcements.
+    if seen is None or key not in seen:
+        e["weight"] = e.get("weight", 1) + 1
+        if seen is not None:
+            seen.add(key)
     if _PRIORITY.get(etype, 0) > _PRIORITY.get(e.get("type", "related"), 0):
         e["type"] = etype
     if tag and tag not in e.setdefault("tags", []):
@@ -203,6 +213,7 @@ def update(graph: dict, insights: dict, context: dict) -> list[str]:
 
     new_names: list[str] = []
     touched_ids: list[str] = []
+    seen: set[str] = set()
 
     for t in insights.get("topics", []):
         name = (t.get("name") or "").strip()
@@ -248,7 +259,7 @@ def update(graph: dict, insights: dict, context: dict) -> list[str]:
                 continue
             rid = slug(rname)
             if rid in graph["nodes"] and not graph["nodes"][rid].get("placeholder"):
-                _link(graph, nid, rid, "related")
+                _link(graph, nid, rid, "related", seen=seen)
 
         # 2) shared-tag links to EXISTING concepts across all past sessions
         linked_this_node: set[str] = set()
@@ -264,7 +275,7 @@ def update(graph: dict, insights: dict, context: dict) -> list[str]:
                 if b in linked_this_node:
                     continue
                 linked_this_node.add(b)
-                _link(graph, nid, b, "shared-tag", tag=nt)
+                _link(graph, nid, b, "shared-tag", tag=nt, seen=seen)
 
     # 3) concepts learned together this turn. Link each to the turn's PRIMARY
     #    concept (topics come "most important first") rather than fully
@@ -273,7 +284,7 @@ def update(graph: dict, insights: dict, context: dict) -> list[str]:
     if touched_ids:
         hub = touched_ids[0]
         for other in touched_ids[1:]:
-            _link(graph, hub, other, "co-occurs")
+            _link(graph, hub, other, "co-occurs", seen=seen)
 
     if session:
         s = graph["sessions"].setdefault(session, {"cwd": cwd, "topics": [], "first": when})

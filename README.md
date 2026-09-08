@@ -35,14 +35,19 @@ learnlance setup
 ```
 
 `setup` detects the agents you have and writes their hooks for the current
-project. Run it again in each project you want tracked, then reload your editor
-and code as usual.
+project. By default it analyzes your work with a separate LLM CLI (`claude`,
+`gemini`, `copilot`, `cursor-agent`, or `ollama`).
 
-Prefer the agent to analyze its own work in your chat, instead of a separate CLI?
+**Using a chat agent** (Copilot Chat in VS Code, Cursor, Kiro, Command Code,
+Antigravity, or Gemini)? Let the agent analyze its own work in the chat instead —
+no separate CLI to install:
 
 ```bash
 learnlance setup --in-chat
 ```
+
+Run `setup` again in each project you want tracked, then reload your editor and
+code as usual.
 
 Check what's actually installed and firing:
 
@@ -52,12 +57,13 @@ learnlance doctor
 
 ### Install one agent by hand
 
-`learnlance install` with no flags targets Claude Code; a flag targets the rest.
+`learnlance install` with no flags is the same as `learnlance setup` — it detects
+your agents and configures them all. Pass a flag to configure just one agent,
+skipping detection:
 
 ```bash
-learnlance install                # Claude Code (Stop hook)
-learnlance install --cursor        # Cursor
-learnlance install --codex         # OpenAI Codex
+learnlance install --cursor        # Cursor only
+learnlance install --codex         # OpenAI Codex only
 learnlance install --copilot       # Copilot CLI / cloud / VS Code Chat
 learnlance install --commandcode   # Command Code
 learnlance install --kiro          # Kiro
@@ -65,6 +71,8 @@ learnlance install --gemini        # Gemini CLI
 learnlance install --antigravity   # Antigravity
 learnlance install --git           # git post-commit (universal fallback)
 ```
+
+Run `learnlance install --help` for the full list and options.
 
 ## Supported agents
 
@@ -125,8 +133,10 @@ learnlance config --disable                  # pause without uninstalling hooks
 learnlance config --enable                   # re-enable
 ```
 
-Everything lives under `~/.learnlance/`: `graph.json` (the graph), `graph.html`
-(the visualization), `insights/` (recaps), `learnlance.log` (diagnostics).
+Everything lives under `~/.learnlance/`. Each project keeps its own graph at
+`projects/<project>-<hash>/graph.json`; `graph.html` is the multi-project
+dashboard you can open to switch between projects. `insights/` holds per-session
+recaps and `learnlance.log` holds diagnostics.
 
 ## Uninstall
 

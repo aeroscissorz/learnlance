@@ -73,6 +73,32 @@ def test_in_chat_is_refused_for_harnesses_that_cannot_do_it(capsys, project, hom
     assert "isn't available for" in out and "git" in out
 
 
+def test_bare_install_is_an_alias_for_setup(monkeypatch):
+    """Bare `install` used to silently target only Claude Code; it now means the
+    same as `setup`, so there is one obvious way to get configured."""
+    seen = {}
+    monkeypatch.setattr(cli, "_cmd_setup",
+                        lambda a: seen.update(path=a.path, in_chat=a.in_chat))
+    args = cli.build_parser().parse_args(["install", "--path", "/tmp/p"])
+    args.func(args)
+    assert seen == {"path": "/tmp/p", "in_chat": False}
+
+
+def test_top_help_has_clear_direction(capsys):
+    cli.build_parser().print_help()
+    out = capsys.readouterr().out
+    assert "Get started" in out
+    assert "learnlance setup" in out
+    assert "Commands:" in out
+
+
+def test_help_command_does_not_install_hooks(capsys, home, project, monkeypatch):
+    """`help` is meta: showing it must not write hooks (it used to auto-setup)."""
+    monkeypatch.chdir(project)
+    assert cli.main(["help"]) == 0
+    assert not (Path.home() / ".claude" / "settings.json").exists()
+
+
 # --------------------------------------------------------------------------- #
 # The standalone launcher — used when the console script isn't on PATH
 # --------------------------------------------------------------------------- #
@@ -152,6 +178,14 @@ def test_the_installed_hook_command_carries_the_source(project, home):
             assert "--source kiro" in hook["action"]["command"]
 
 
+def test_hook_command_prefers_the_source_launcher(monkeypatch):
+    """In a checkout, the hook must run our code, not a stale console script."""
+    from learnlance import install
+
+    monkeypatch.setattr(install.os, "name", "nt")
+    assert install.hook_command() == f'& "{sys.executable}" "{LAUNCHER}"'
+
+
 # --------------------------------------------------------------------------- #
 # Backend resolution
 # --------------------------------------------------------------------------- #
@@ -226,6 +260,20 @@ def test_related_suggestions_do_not_create_unused_graph_nodes():
     assert "delta-encoding" in g["nodes"]
     assert "data-compression" not in g["nodes"]
     assert "algorithms" not in g["nodes"]
+
+
+def test_a_pair_linked_multiple_ways_in_one_turn_keeps_one_weight():
+    """related + shared-tag + co-occurs in one turn are one relationship, not three."""
+    g = graph.empty()
+    ctx = {"when": "t", "session": "s", "cwd": "/p", "files": []}
+    graph.update(g, {"did": "x", "topics": [
+        {"name": "A", "tags": ["shared"], "related": ["B"]},
+        {"name": "B", "tags": ["shared"], "related": ["A"]},
+    ]}, ctx)
+    (edge,) = [e for e in g["edges"] if {e["source"], e["target"]} == {"a", "b"}]
+    assert edge["weight"] == 1
+    assert edge["type"] == "co-occurs"
+    assert edge["tags"] == ["shared"]
 
 
 def test_json_wrapped_in_prose_or_fences_is_still_parsed():

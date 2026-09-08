@@ -12,8 +12,50 @@ from . import (autosetup, capabilities, codesearch, config, graph, hook, inchat,
 from .spinner import Spinner
 
 
-# Harnesses selectable with a flag. Claude Code is the flagless default since
-# its hook is user-level rather than per-project.
+_TOP_HELP = """\
+learnlance — turn what AI coding agents build into a growing knowledge graph.
+
+usage:
+  learnlance <command> [options]
+  learnlance <command> --help
+
+Get started:
+  pip install learnlance-univ
+  learnlance setup                  # configure this project (analyzes via an LLM CLI)
+  learnlance setup --in-chat        # chat agents analyze their own work instead
+  # ... then just code. `learnlance show` opens your graph.
+
+Commands:
+  setup                     detect your agents and configure this project (run first)
+  install [--<agent>]       configure one agent by hand; bare = same as setup
+  uninstall [--<agent>]     remove hooks; bare = remove Claude Code + stop auto-setup
+  doctor                    check the environment and which hooks are installed
+  config                    view or change settings (LLM command, model, limits)
+  show                      render + open the interactive HTML knowledge graph
+  list [-v]                 list learned concepts (with explanations)
+  stats                     counts by category
+  add <concept>...          add a concept the agent missed (searches your code)
+  clear [concept ...]       remove one concept, or wipe the whole graph
+  help                      show this help
+
+Agents:
+  Claude Code, Kiro, Cursor, GitHub Copilot, Command Code, Gemini CLI,
+  Antigravity, OpenAI Codex, git commit.
+
+Run `learnlance <command> --help` for a command's full options.
+"""
+
+
+class _HelpParser(argparse.ArgumentParser):
+    """Top-level parser that prints a curated menu instead of argparse's default."""
+
+    def print_help(self, file=None):
+        file = file or sys.stdout
+        file.write(_TOP_HELP)
+
+
+# Harnesses selectable with a flag. Claude Code needs no flag: its hook is
+# user-level, so `setup` (and bare `install`) always install it.
 _INSTALLERS = {
     "kiro": ("install_kiro_hook", "uninstall_kiro_hook"),
     "cursor": ("install_cursor_hook", "uninstall_cursor_hook"),
@@ -33,34 +75,26 @@ def _selected_harnesses(args) -> list[str]:
 def _cmd_install(args):
     chosen = _selected_harnesses(args)
     in_chat = getattr(args, "in_chat", False)
-    # An explicit install is consent: undo any previous `uninstall` opt-out.
-    autosetup.set_opted_out(False)
-    if chosen:
-        project = os.path.abspath(args.path or os.getcwd())
-        unsupported = [n for n in chosen if in_chat and n not in inchat.SUPPORTED]
-        if unsupported:
-            # Apply --in-chat where it works rather than refusing the whole batch.
-            print(f"--in-chat isn't available for: {', '.join(unsupported)}"
-                  f" — installing those in normal mode.")
-        for name in chosen:
-            fn = getattr(install, _INSTALLERS[name][0])
-            print(fn(project, in_chat) if name in inchat.SUPPORTED else fn(project))
-        print("\nlearnlance will now learn from the code these agents write.")
-        if in_chat:
-            print("No LLM CLI needed — the agent analyzes its own work in-chat.")
+    if not chosen:
+        # Bare `install` is the same operation as `setup`: detect and configure
+        # every harness in use, instead of silently installing only Claude Code.
+        _cmd_setup(args)
         return
 
-    print(install.install_hook())
-    cfg = config.load_config()
-    label = insights.backend_label(cfg)
-    if label:
-        print(f"\nAnalysis backend: {label} — no API key needed.")
-    else:
-        print("\n⚠  No LLM CLI found, so nothing can be analyzed yet.")
-        print("     Install one of: " + ", ".join(n for n, _ in insights.KNOWN_BACKENDS))
-        print("     or point at any CLI: learnlance config --llm-cmd \"ollama run llama3\"")
-        print("     Edits are still captured meanwhile, and analyzed once one exists.")
-    print("\nDone. New sessions will now build your knowledge graph.")
+    # Picking agents by hand is explicit consent: undo any `uninstall` opt-out.
+    autosetup.set_opted_out(False)
+    project = os.path.abspath(args.path or os.getcwd())
+    unsupported = [n for n in chosen if in_chat and n not in inchat.SUPPORTED]
+    if unsupported:
+        # Apply --in-chat where it works rather than refusing the whole batch.
+        print(f"--in-chat isn't available for: {', '.join(unsupported)}"
+              f" — installing those in normal mode.")
+    for name in chosen:
+        fn = getattr(install, _INSTALLERS[name][0])
+        print(fn(project, in_chat) if name in inchat.SUPPORTED else fn(project))
+    print("\nlearnlance will now learn from the code these agents write.")
+    if in_chat:
+        print("No LLM CLI needed — the agent analyzes its own work in-chat.")
 
 
 def _cmd_uninstall(args):
@@ -405,19 +439,17 @@ def _cmd_worker(args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    p = _HelpParser(
         prog="learnlance",
-        description="Turn what AI agents build into a growing knowledge graph. "
-                    "Run `learnlance setup` once per project to get started.")
-    # metavar lists only the user-facing commands; internal ones (hook,
-    # _worker) are added below without help= so they stay out of the listing.
-    sub = p.add_subparsers(
-        dest="cmd",
-        metavar="{setup,install,uninstall,config,show,list,stats,clear,add,doctor,help}",
-    )
+        description="Turn what AI coding agents build into a growing personal "
+                    "knowledge graph.")
+    # Internal commands (hook, _worker) are added below without help= so they
+    # stay out of listings.
+    sub = p.add_subparsers(dest="cmd", metavar="<command>",
+                           parser_class=argparse.ArgumentParser)
 
     st_up = sub.add_parser("setup",
-                           help="detect your agents and configure them (run this first)")
+                           help="detect your agents and configure this project (run first)")
     st_up.add_argument("--in-chat", dest="in_chat", action="store_true",
                        help="let the agent analyze its own work — no LLM CLI to install")
     st_up.add_argument("-v", "--verbose", action="store_true",
@@ -426,7 +458,7 @@ def build_parser() -> argparse.ArgumentParser:
     st_up.set_defaults(func=_cmd_setup)
 
     ins = sub.add_parser("install",
-                         help="install hooks (Claude Code by default; or pick harnesses)")
+                         help="configure one agent by hand; bare = detect + configure everything")
     ins.add_argument("--kiro", action="store_true", help="Kiro (PostToolUse + Stop)")
     ins.add_argument("--cursor", action="store_true", help="Cursor (afterFileEdit + stop)")
     ins.add_argument("--copilot", action="store_true",
@@ -448,7 +480,7 @@ def build_parser() -> argparse.ArgumentParser:
     ins.set_defaults(func=_cmd_install)
 
     un = sub.add_parser("uninstall",
-                        help="remove hooks (Claude Code by default; or pick harnesses)")
+                        help="remove hooks; bare = remove Claude Code + disable auto-setup")
     un.add_argument("--kiro", action="store_true", help="remove the Kiro hooks")
     un.add_argument("--cursor", action="store_true", help="remove the Cursor hooks")
     un.add_argument("--copilot", action="store_true", help="remove the Copilot hooks")
@@ -462,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     un.add_argument("--path", metavar="DIR", help="repo/project dir (default: current dir)")
     un.set_defaults(func=_cmd_uninstall)
 
-    c = sub.add_parser("config", help="view/set configuration")
+    c = sub.add_parser("config", help="view or change settings")
     c.add_argument("--llm-cmd", dest="llm_cmd", metavar="CMD",
                    help='LLM CLI used for analysis, e.g. "ollama run llama3" '
                         '("" to go back to auto-detection)')
@@ -476,35 +508,35 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--max-topics", dest="max_topics", type=int)
     c.set_defaults(func=_cmd_config)
 
-    s = sub.add_parser("show", help="render + open the HTML knowledge graph")
+    s = sub.add_parser("show", help="render + open the interactive HTML knowledge graph")
     s.add_argument("--no-open", action="store_true", help="just write the file")
     s.add_argument("--project", metavar="DIR", help="project dir (default: current dir)")
     s.set_defaults(func=_cmd_show)
 
-    l = sub.add_parser("list", help="list learned concepts in the terminal")
+    l = sub.add_parser("list", help="list learned concepts")
     l.add_argument("-v", "--verbose", action="store_true")
     l.add_argument("--project", metavar="DIR", help="project dir (default: current dir)")
     l.set_defaults(func=_cmd_list)
 
-    st = sub.add_parser("stats", help="summary counts")
+    st = sub.add_parser("stats", help="summary counts by category")
     st.add_argument("--project", metavar="DIR", help="project dir (default: current dir)")
     st.set_defaults(func=_cmd_stats)
 
-    cl = sub.add_parser("clear", help="clear the whole graph, or one concept")
+    cl = sub.add_parser("clear", help="remove one concept, or wipe the whole graph")
     cl.add_argument("concept", nargs="*",
                     help="concept name to remove; omit to clear the entire graph")
     cl.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
     cl.add_argument("--project", metavar="DIR", help="project dir (default: current dir)")
     cl.set_defaults(func=_cmd_clear)
 
-    a = sub.add_parser("add", help="add a concept Claude missed (searches your code)")
+    a = sub.add_parser("add", help="add a concept the agent missed (searches your code)")
     a.add_argument("topic", nargs="+", help="the concept to find and add, e.g. debouncing")
     a.add_argument("--path", metavar="DIR", help="codebase to search (default: current dir)")
     a.add_argument("--force", action="store_true",
                    help="add even if no code references are found")
     a.set_defaults(func=_cmd_add)
 
-    sub.add_parser("doctor", help="check environment + which hooks are installed").set_defaults(func=_cmd_doctor)
+    sub.add_parser("doctor", help="check environment and installed hooks").set_defaults(func=_cmd_doctor)
 
     sub.add_parser("help", help="show this help message").set_defaults(func=_cmd_help)
 
@@ -525,7 +557,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 # Commands that must never trigger the implicit auto-setup (see main()).
-_NO_AUTOSETUP = frozenset({"hook", "_worker", "install", "uninstall", "setup"})
+# `help` is meta — showing it must not write hooks into the current project.
+_NO_AUTOSETUP = frozenset({"hook", "_worker", "install", "uninstall", "setup",
+                           "help"})
 
 
 def main(argv=None) -> int:
