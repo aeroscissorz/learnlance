@@ -21,6 +21,7 @@ _INSTALLERS = {
     "gemini": ("install_gemini_hook", "uninstall_gemini_hook"),
     "antigravity": ("install_antigravity_hook", "uninstall_antigravity_hook"),
     "codex": ("install_codex_hook", "uninstall_codex_hook"),
+    "commandcode": ("install_commandcode_hook", "uninstall_commandcode_hook"),
     "git": ("install_git_hook", "uninstall_git_hook"),
 }
 
@@ -193,7 +194,7 @@ def _cmd_doctor(args):
     for name, label in (("kiro", "Kiro"), ("cursor", "Cursor"),
                         ("copilot", copilot_label), ("gemini", "Gemini CLI"),
                         ("antigravity", "Antigravity"), ("codex", "OpenAI Codex"),
-                        ("git", "git commit")):
+                        ("commandcode", "Command Code"), ("git", "git commit")):
         present = autosetup.hook_present(name, here)
         state = capabilities.status(name, present,
                                     autosetup.hook_in_chat(name, here), log)
@@ -436,6 +437,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Google Antigravity (PostToolUse + Stop)")
     ins.add_argument("--codex", action="store_true",
                      help="OpenAI Codex (PostToolUse + Stop)")
+    ins.add_argument("--commandcode", action="store_true",
+                     help="Command Code (PostToolUse + Stop)")
     ins.add_argument("--git", action="store_true",
                      help="git post-commit — universal fallback for tools with no hooks")
     ins.add_argument("--in-chat", dest="in_chat", action="store_true",
@@ -453,6 +456,8 @@ def build_parser() -> argparse.ArgumentParser:
     un.add_argument("--antigravity", action="store_true",
                      help="remove the Antigravity hooks")
     un.add_argument("--codex", action="store_true", help="remove the Codex hooks")
+    un.add_argument("--commandcode", action="store_true",
+                    help="remove the Command Code hooks")
     un.add_argument("--git", action="store_true", help="remove the git post-commit hook")
     un.add_argument("--path", metavar="DIR", help="repo/project dir (default: current dir)")
     un.set_defaults(func=_cmd_uninstall)

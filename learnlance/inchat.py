@@ -10,6 +10,7 @@ prompt that the harness submits as another turn.
     Copilot      agentStop   -> {"decision": "block",  "reason": …}
     Gemini CLI   AfterAgent  -> {"decision": "deny",   "reason": …}
     Antigravity  Stop        -> {"decision": "block",  "reason": …}
+    Command Code Stop        -> {"decision": "block",  "reason": …}
     Kiro         Stop        -> a second hook with the `agent` action type
 
 The agent writes its answer as JSON into `~/.learnlance/inbox/`, and the next
@@ -244,11 +245,12 @@ def followup_output(source: str, prompt: str) -> dict | None:
     """
     if source == "cursor":
         return {"followup_message": prompt}
-    if source in ("copilot", "antigravity", "codex"):
+    if source in ("copilot", "antigravity", "codex", "commandcode"):
         return {"decision": "block", "reason": prompt}
     if source == "gemini":
         return {"decision": "deny", "reason": prompt}
     return None
 
 
-SUPPORTED = ("cursor", "copilot", "gemini", "antigravity", "kiro", "codex")
+SUPPORTED = ("cursor", "copilot", "gemini", "antigravity", "kiro", "codex",
+             "commandcode")

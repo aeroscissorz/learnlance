@@ -5,13 +5,16 @@ processing framework**: any AI coding harness (or plain git) feeds a normalized
 event into one core engine.
 
 ```
-   Claude Code ─┐
-   Kiro IDE ────┤
-   Cursor ──────┤
-   Copilot ─────┼──►  Adapter  ──►  CodeEvent  ──►  Core engine  ──►  Knowledge graph
-   Gemini CLI ──┤    (per-tool)     (uniform)      (harness-blind)     + HTML + recap
-   git commit ──┤
-   generic ─────┘
+   Claude Code ───┐
+   Kiro IDE ──────┤
+   Cursor ────────┤
+   Copilot ───────┤
+   Codex ─────────┤
+   Command Code ──┼──►  Adapter  ──►  CodeEvent  ──►  Core engine  ──►  Knowledge graph
+   Gemini CLI ────┤    (per-tool)     (uniform)      (harness-blind)     + HTML + recap
+   Antigravity ───┤
+   git commit ────┤
+   generic ───────┘
 ```
 
 ## The abstraction
@@ -59,6 +62,8 @@ and **observed** (that hook has actually fired, read from the log — evidence).
 | Copilot / VS Code | `PostToolUse` + `Stop` | `Stop` → `decision: "block"` | documented |
 | Gemini CLI | `AfterTool` + `AfterAgent` | `AfterAgent` → `decision: "deny"` | documented, deprecating |
 | Antigravity | `PostToolUse` + `Stop` | `Stop` → `decision: "block"` | **disputed** |
+| Codex | `PostToolUse` + `Stop` | `Stop` → `decision: "block"` | documented |
+| Command Code | `PostToolUse` + `Stop` | `Stop` → `decision: "block"` | documented |
 | git | `post-commit` | — no agent to ask | documented |
 
 `disputed` means the docs describe it but there are credible reports it doesn't
@@ -139,6 +144,8 @@ is all it has.
 | `copilot` | `PostToolUse` | `Stop` | `.github/hooks/learnlance.json` (`--copilot`) |
 | `gemini` | `AfterTool` | `AfterAgent` | `.gemini/settings.json` (`--gemini`) |
 | `antigravity` | `PostToolUse` | `Stop` | `.agents/hooks.json` (`--antigravity`) |
+| `codex` | `PostToolUse` | `Stop` | `.codex/hooks.json` (`--codex`) |
+| `commandcode` | `PostToolUse` | `Stop` | `.commandcode/settings.json` (`--commandcode`) |
 | `git` | — | `post-commit` | `.git/hooks/post-commit` (`--git`) |
 | `generic` | — | caller assembles it | — (tests / embedding) |
 
@@ -293,6 +300,8 @@ prompt as another turn:
 | Copilot | `{"decision":"block","reason":…}` | 8-continuation cap, `stop_hook_active` |
 | Gemini | `{"decision":"deny","reason":…}` | `stop_hook_active` |
 | Antigravity | `{"decision":"block","reason":…}` | (undocumented) |
+| Codex | `{"decision":"block","reason":…}` | our one-ask cap |
+| Command Code | `{"decision":"block","reason":…}` | `stop_hook_active`, 3-retry cap |
 | Kiro | — command hooks have no such field | (none) |
 
 The agent writes its answer as JSON into `~/.learnlance/inbox/`, and the *next*
@@ -417,6 +426,26 @@ and one registration serve them. Getting that registration right is fiddly:
   and that hook config changes need a full application restart rather than a new
   chat. This adapter is written to the documented contract but is the least
   confirmed of the six. `learnlance doctor` after a real turn is the check.
+
+### Command Code
+- **Config:** `.commandcode/settings.json` (project) or
+  `~/.commandcode/settings.json` (user), under a `hooks` key. Two-level nesting:
+  event → `[{matcher, hooks:[{type, command, timeout}]}]`. `timeout` is in
+  **seconds**, default 30.
+- **Capture:** `PostToolUse` on the write tools. The matcher is tested against
+  `tool_display_name` (`WRITE`/`EDIT`), **not** the canonical wire name — so it
+  must be `write|edit`, not `write_file|edit_file` (the adapter's `matcher`
+  attribute is what the installer uses). New content is in `tool_input.content`
+  (`write_file`) / `tool_input.new_value` (`edit_file`).
+- **Analyze:** `Stop`. `Stop` carries no tool, so it must have **no matcher** — a
+  matcher there prevents the hook from firing. **stdin:** `session_id`,
+  `transcript_path`, `cwd`, `hook_event_name`, plus `stop_hook_active` on retries.
+- **In-chat:** `Stop` → `{"decision": "block", "reason": …}`, retries capped at 3.
+  `stop_hook_active` is Command Code's own loop guard; learnlance's one-ask cap is
+  the second line of defence.
+- **Gotcha:** `Stop` also carries a `transcript_path`, but learnlance uses the
+  buffered path rather than the transcript (Command Code's JSONL format is its
+  own), so the adapter ignores `transcript_path` and drains `pending.py` instead.
 
 ### Cross-harness gotchas the adapters must absorb
 - **No harness hands you a diff, and you don't want one.** You reconstruct file

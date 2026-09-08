@@ -22,7 +22,7 @@ Two shapes of harness show up here:
   * **Transcript-style** (Claude Code) hands over the whole turn in one call, so
     the adapter reads every edit out of the transcript and is done.
 
-  * **Tool-at-a-time** (Kiro, Cursor, Copilot, Gemini, Codex) notifies you once per tool
+  * **Tool-at-a-time** (Kiro, Cursor, Copilot, Gemini, Codex, Command Code) notifies you once per tool
     call and gives you nothing at the end. `BufferedToolAdapter` implements that
     pattern once: each edit is appended to a per-session buffer (pending.py), and
     the harness's end-of-turn event drains it into a single event.
@@ -140,6 +140,10 @@ class BufferedToolAdapter(HookAdapter):
 
     write_tools: dict[str, tuple[tuple[str, ...], str]] = {}
     end_events: tuple[str, ...] = ()
+    #: Regex the harness's hook config should use to match write tools. Defaults to
+    #: the alternation of `write_tools`; Command Code overrides it because its
+    #: matcher is tested against `tool_display_name`, not the wire name.
+    matcher: str = ""
     session_keys: tuple[str, ...] = ("session_id", "sessionId")
     cwd_keys: tuple[str, ...] = ("cwd",)
     prompt_keys: tuple[str, ...] = ("prompt", "user_prompt", "userPrompt")
@@ -491,6 +495,28 @@ def _codex_patch_edits(patch: str) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# Command Code
+# --------------------------------------------------------------------------- #
+class CommandCodeAdapter(BufferedToolAdapter):
+    """Command Code: `PostToolUse` on `write`/`edit`, drained on `Stop`.
+
+    Command Code's payload is already the snake_case shape the shared base reads
+    (`session_id`, `cwd`, `hook_event_name`, `tool_name`, `tool_input`). The one
+    asymmetry is the hook `matcher`: it is tested against `tool_display_name`
+    (`SHELL`/`READ`/`WRITE`/`EDIT`), not the canonical wire name — so `matcher`
+    below uses the display names rather than the `write_tools` keys.
+    """
+
+    source = "commandcode"
+    matcher = "write|edit"  # display names, not wire names — see class docstring
+    write_tools = {
+        "write_file": (("content",), "created"),
+        "edit_file": (("new_value",), "edited"),
+    }
+    end_events = ("stop",)
+
+
+# --------------------------------------------------------------------------- #
 # git (universal — works with ANY editor/agent, triggers on commit)
 # --------------------------------------------------------------------------- #
 def _git(cwd: str, *args: str) -> str:
@@ -566,12 +592,14 @@ _ADAPTERS = {
     "gemini": GeminiAdapter,
     "antigravity": AntigravityAdapter,
     "codex": CodexAdapter,
+    "commandcode": CommandCodeAdapter,
     "git": GitAdapter,
     "generic": GenericAdapter,
 }
 
 # Harnesses whose installer pins `--source`, i.e. everything buffered.
-BUFFERED_SOURCES = ("kiro", "cursor", "copilot", "gemini", "antigravity", "codex")
+BUFFERED_SOURCES = ("kiro", "cursor", "copilot", "gemini", "antigravity", "codex",
+                    "commandcode")
 
 
 def write_tools_for(source: str) -> tuple[str, ...]:
@@ -580,6 +608,18 @@ def write_tools_for(source: str) -> tuple[str, ...]:
     cls = _ADAPTERS.get(source)
     tools = getattr(cls, "write_tools", None) or {}
     return tuple(tools)
+
+
+def matcher_for(source: str) -> str:
+    """The regex a harness's hook config should use to notify us about write tools.
+
+    Usually the alternation of `write_tools_for(source)`. Command Code is the
+    exception: its matcher is tested against `tool_display_name` (`WRITE`/`EDIT`),
+    not the canonical wire names, so its adapter declares that matcher explicitly.
+    """
+    cls = _ADAPTERS.get(source)
+    declared = getattr(cls, "matcher", "") or ""
+    return declared or "|".join(write_tools_for(source))
 
 
 def detect(payload: dict) -> HookAdapter | None:

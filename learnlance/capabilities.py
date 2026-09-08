@@ -96,6 +96,13 @@ CAPABILITIES: dict[str, Capability] = {
              "captured because their file changes cannot be attributed reliably "
              "from the hook payload. Requires Codex hook trust review.",
     ),
+    "commandcode": Capability(
+        hook="PostToolUse + Stop",
+        in_chat='Stop -> {"decision": "block", "reason": ...}',
+        note="Matcher is tested against tool_display_name (WRITE/EDIT), not the "
+             "wire names, so the installer uses a display-name matcher. Stop "
+             "carries stop_hook_active, backing up our own one-ask cap.",
+    ),
     "git": Capability(
         hook="post-commit",
         in_chat="",

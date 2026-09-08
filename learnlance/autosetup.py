@@ -96,6 +96,11 @@ def _codex_marker(cwd):
             or shutil.which("codex") is not None)
 
 
+def _commandcode_marker(cwd):
+    return ((Path(cwd) / ".commandcode").is_dir()
+            or (Path.home() / ".commandcode").is_dir())
+
+
 def _git_marker(cwd):
     try:
         p = subprocess.run(["git", "-C", cwd, "rev-parse", "--git-dir"],
@@ -152,6 +157,12 @@ HARNESSES = {
         "detect": _codex_marker,
         "config": lambda cwd: install.codex_hooks_path(cwd),
         "install": lambda cwd, in_chat=False: install.install_codex_hook(cwd, in_chat),
+    },
+    "commandcode": {
+        "label": "Command Code",
+        "detect": _commandcode_marker,
+        "config": lambda cwd: install.commandcode_settings_path(cwd),
+        "install": lambda cwd, in_chat=False: install.install_commandcode_hook(cwd, in_chat),
     },
     "git": {
         "label": "git commit",

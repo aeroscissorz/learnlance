@@ -144,6 +144,10 @@ def capture_payload(source: str, session: str, cwd: str, code: str = CODE,
         return {**base, "hook_event_name": "PostToolUse",
                 "tool_name": tool or "apply_patch",
                 "tool_input": {"command": patch}}
+    if source == "commandcode":
+        return {**base, "hook_event_name": "PostToolUse",
+                "tool_name": tool or "write_file",
+                "tool_input": {"file_path": path, "content": code}}
     raise AssertionError(f"no capture payload defined for {source!r}")
 
 
@@ -155,6 +159,7 @@ END_EVENT = {
     "gemini": "AfterAgent",
     "antigravity": "Stop",
     "codex": "Stop",
+    "commandcode": "Stop",
 }
 
 BUFFERED = tuple(END_EVENT)

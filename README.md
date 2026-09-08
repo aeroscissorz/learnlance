@@ -1,6 +1,6 @@
 # learnlance 🧠🔍
 
-A learning companion for **Claude Code, OpenAI Codex**, and other coding agents. Every time an agent finishes a turn and
+A learning companion for **Claude Code, OpenAI Codex, Command Code**, and other coding agents. Every time an agent finishes a turn and
 has generated or edited code, learnlance quietly:
 
 1. reads the session transcript and pulls out the code that was just written,
@@ -67,6 +67,18 @@ python -m learnlance install --codex
 Codex's native `apply_patch` edits are captured through `PostToolUse` and
 analyzed at `Stop`. After installing, review/trust the hook in Codex with
 `/hooks`. Use `--in-chat` if you want Codex to analyze its own work.
+
+### Command Code
+
+Install the project-local Command Code hooks with:
+
+```bash
+python -m learnlance install --commandcode
+```
+
+Command Code's `write_file` and `edit_file` tools are captured through
+`PostToolUse` and analyzed at `Stop`. Use `--in-chat` to have Command Code
+analyze its own work.
 
 When you run any `learnlance` command in a project, it automatically detects
 active agent environments and installs missing project hooks. This also works

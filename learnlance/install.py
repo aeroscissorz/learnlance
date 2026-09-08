@@ -7,6 +7,7 @@ Per harness:
   * Copilot      postToolUse + agentStop in .github/hooks/learnlance.json.
   * Gemini CLI   AfterTool + AfterAgent in .gemini/settings.json.
   * Codex        PostToolUse + Stop in .codex/hooks.json.
+  * Command Code PostToolUse + Stop in .commandcode/settings.json.
   * git          post-commit in a repo (universal fallback — triggers on commit,
                  so it works with any editor, but see ARCHITECTURE.md for why
                  it's the last resort rather than the default).
@@ -267,8 +268,12 @@ def _source_cmd(source: str, in_chat: bool = False, end: bool = False) -> str:
 
 
 def _matcher_for(source: str) -> str:
-    """Regex alternation of the tools whose output that adapter can read."""
-    return "|".join(adapters.write_tools_for(source))
+    """Regex the harness should use to notify us about write tools.
+
+    Delegates to the adapter so a harness whose matcher is tested against a
+    different field (Command Code uses `tool_display_name`) can declare its own.
+    """
+    return adapters.matcher_for(source)
 
 
 def _read_json(p: Path) -> dict:
@@ -536,6 +541,65 @@ def uninstall_codex_hook(project: str) -> str:
     n = _drop_ours(hooks, CODEX_EVENTS)
     if not n:
         return "No learnlance Codex hooks found; nothing to remove."
+    _write_json(target, data)
+    return f"Removed {n} learnlance hook entr(y/ies) from {target}"
+
+
+# --------------------------------------------------------------------------- #
+# Command Code (.commandcode/settings.json — shared file, merge)
+# --------------------------------------------------------------------------- #
+def commandcode_settings_path(project: str) -> Path:
+    return Path(project) / ".commandcode" / "settings.json"
+
+
+COMMANDCODE_EVENTS = ("PostToolUse", "Stop")
+
+
+def install_commandcode_hook(project: str, in_chat: bool = False) -> str:
+    """Register Command Code's write-capture and end-of-turn hooks.
+
+    Command Code tests its `matcher` against `tool_display_name` (`WRITE`/`EDIT`),
+    not the wire names (`write_file`/`edit_file`), so the capture hook's matcher
+    is the adapter's display-name matcher rather than its `write_tools` keys.
+    `Stop` carries no tool, so it must have no matcher — a matcher there would
+    make the hook never fire.
+    """
+    target = commandcode_settings_path(project)
+    data = _read_json(target)
+    hooks = data.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        return f"{target} has an unexpected 'hooks' shape; leaving it alone."
+
+    capture = {"matcher": _matcher_for("commandcode"), "hooks": [{
+        "type": "command", "command": _source_cmd("commandcode"), "timeout": 30,
+    }]}
+    stop = {"hooks": [{
+        "type": "command",
+        "command": _source_cmd("commandcode", in_chat, end=True), "timeout": 30,
+    }]}
+    _merge_event(hooks, "PostToolUse", capture)
+    _merge_event(hooks, "Stop", stop)
+    _write_json(target, data)
+
+    out = (f"Installed Command Code hooks at {target}\n"
+           f"  PostToolUse (write|edit) -> captures each edit\n"
+           f"  Stop                      -> learns from the turn")
+    if in_chat:
+        out += "\n  in-chat mode: analysis happens in your chat."
+    return out
+
+
+def uninstall_commandcode_hook(project: str) -> str:
+    target = commandcode_settings_path(project)
+    if not target.exists():
+        return "No Command Code settings.json here; nothing to remove."
+    data = _read_json(target)
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return "No learnlance Command Code hooks found; nothing to remove."
+    n = _drop_ours(hooks, COMMANDCODE_EVENTS)
+    if not n:
+        return "No learnlance Command Code hooks found; nothing to remove."
     _write_json(target, data)
     return f"Removed {n} learnlance hook entr(y/ies) from {target}"
 
