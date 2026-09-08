@@ -2,6 +2,35 @@
 
 Turn what AI coding agents build into a growing personal knowledge graph.
 
+[Demo](#demo) · [Install](#install) · [Contribute](#contributing)
+
+```
+┌───────────────────────────────────────────┐
+│                                           │
+│            YOUR LEARNING GRAPH            │
+│                                           │
+│      React ──── Hooks ──── State          │
+│         │            │                    │
+│         ├── Closure ─┴── Event Loop       │
+│         │                                 │
+│         └── Component Lifecycle           │
+│                                           │
+└───────────────────────────────────────────┘
+```
+
+You use AI to write code.
+
+Learnlance watches what gets built and turns that work into concepts you
+can actually understand and remember.
+
+**AI writes the code. Learnlance helps you learn from it.**
+
+## Demo
+
+<!-- Drop in a real GIF or video of the graph being generated, e.g.:
+     ![Learnlance demo](docs/demo.gif)
+-->
+
 learnlance watches your agent — **Claude Code, OpenAI Codex, Cursor, GitHub
 Copilot (CLI / cloud / VS Code), Command Code, Kiro, Gemini CLI, Antigravity**,
 or plain `git commit` — and after every turn that writes or edits code, it
