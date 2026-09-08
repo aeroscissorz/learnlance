@@ -148,3 +148,33 @@ python -m learnlance uninstall
 
 Zero third-party dependencies by design — the hook must run reliably wherever
 Claude Code launches it.
+
+## Contributing
+
+LearnLance is actively looking for contributors.
+
+You don't need to understand the entire codebase to contribute.
+
+### Areas where you can help
+
+- Claude Code integration
+- OpenAI Codex integration
+- Other coding-agent integrations
+- Knowledge graph algorithms
+- Concept extraction
+- Graph visualization
+- CLI/UX improvements
+- Testing
+- Documentation
+- New learning workflows
+
+### Good first contributions
+
+- Add support for another coding agent
+- Improve graph visualization
+- Add tests for transcript parsing
+- Improve Windows compatibility
+- Add new CLI commands
+- Improve concept deduplication
+- Improve accessibility of the graph
+- Add documentation/examples
