@@ -1,181 +1,175 @@
 # learnlance 🧠🔍
 
-A learning companion for **Claude Code, OpenAI Codex, Command Code**, and other coding agents. Every time an agent finishes a turn and
-has generated or edited code, learnlance quietly:
+Turn what AI coding agents build into a growing personal knowledge graph.
 
-1. reads the session transcript and pulls out the code that was just written,
-2. asks Claude *"what concepts could a developer learn from this?"* —
-   e.g. *"you used a **delta function**, here's what delta encoding is"*,
+learnlance watches your agent — **Claude Code, OpenAI Codex, Cursor, GitHub
+Copilot (CLI / cloud / VS Code), Command Code, Kiro, Gemini CLI, Antigravity**,
+or plain `git commit` — and after every turn that writes or edits code, it
+quietly:
+
+1. pulls out the code the agent just wrote,
+2. asks an LLM *"what transferable concepts could a developer learn from this?"* —
+   e.g. *"you used a delta function — here's what delta encoding is"*,
 3. merges those concepts into a **persistent knowledge graph**, and
 4. regenerates an interactive HTML graph you can open any time.
 
-**No API key required.** By default it reuses the `claude` CLI you're already
-logged into (your Claude Code subscription), so there's nothing extra to set up.
+Over time you get a browsable map of everything you've picked up while coding —
+new nodes light up as *🌱 new topics learned*.
 
-So instead of code just appearing, you build up a visual map of everything
-you've picked up along the way — new nodes light up as *🌱 new topics learned*.
+**No API key required.** By default it reuses an LLM CLI you're already logged
+into (`claude`, `gemini`, `copilot`, `cursor-agent`, or `ollama`). Or use
+`--in-chat` and the agent analyzes its own work — no separate CLI at all.
 
 ## Why it won't slow you down or break your session
-- The API call runs in a **detached background process** — Claude Code never waits.
-- The hook is wrapped so any failure is logged and swallowed; it can never
-  interrupt your coding session.
-- Turns with no substantive code make **no API call** (no cost, no noise).
 
-## Install (no pip, no API key)
+- Analysis runs in a **detached background process** — your session never waits.
+- Every hook is wrapped so a failure is logged and swallowed; it can't interrupt
+  your coding session.
+- Turns with no substantive code make **no LLM call** (no cost, no noise).
 
-```bash
-# just install the Claude Code Stop hook — it uses your logged-in `claude`
-python -m learnlance install
-```
-
-Run this from the `learnlance/` project folder. That's it — start (or restart)
-Claude Code and code as usual.
-
-If `claude` isn't on your PATH, point learnlance at it:
+## Install
 
 ```bash
-python -m learnlance config --claude-bin "C:\path\to\claude.cmd"
+pip install learnlance-univ
+learnlance setup
 ```
 
-> Prefer a global `learnlance` command? `pip install -e .` in this folder, then
-> use `learnlance` instead of `python -m learnlance` everywhere.
->
-> Prefer a direct API call instead of the CLI? `learnlance config --backend api
-> --set-key sk-ant-...`
+`setup` detects the agents you have and writes their hooks for the current
+project. Run it again in each project you want tracked, then reload your editor
+and code as usual.
+
+Prefer the agent to analyze its own work in your chat, instead of a separate CLI?
+
+```bash
+learnlance setup --in-chat
+```
+
+Check what's actually installed and firing:
+
+```bash
+learnlance doctor
+```
+
+### Install one agent by hand
+
+`learnlance install` with no flags targets Claude Code; a flag targets the rest.
+
+```bash
+learnlance install                # Claude Code (Stop hook)
+learnlance install --cursor        # Cursor
+learnlance install --codex         # OpenAI Codex
+learnlance install --copilot       # Copilot CLI / cloud / VS Code Chat
+learnlance install --commandcode   # Command Code
+learnlance install --kiro          # Kiro
+learnlance install --gemini        # Gemini CLI
+learnlance install --antigravity   # Antigravity
+learnlance install --git           # git post-commit (universal fallback)
+```
+
+## Supported agents
+
+| Agent | Captures on | Analyzes on |
+|-------|-------------|-------------|
+| Claude Code | (whole transcript) | `Stop` |
+| OpenAI Codex | `PostToolUse` | `Stop` |
+| Cursor | `afterFileEdit` | `stop` |
+| GitHub Copilot — CLI, cloud, VS Code | `PostToolUse` | `Stop` |
+| Command Code | `PostToolUse` | `Stop` |
+| Kiro | `PostToolUse` | `Stop` |
+| Gemini CLI | `AfterTool` | `AfterAgent` |
+| Antigravity | `PostToolUse` | `Stop` |
+| git | — | `post-commit` |
+
+Each integration is written from the vendor's hook docs. `learnlance doctor`
+reports what's configured on disk versus what has actually fired.
 
 ## Use it
 
 ```bash
-learnlance show      # render + open the interactive knowledge graph in your browser
-learnlance list -v   # list learned concepts (with explanations) in the terminal
-learnlance stats     # quick counts, broken down by category
-learnlance help      # show every available command
+learnlance show      # render + open the knowledge graph in your browser
+learnlance list -v   # list learned concepts, with explanations
+learnlance stats     # quick counts by category
+learnlance help      # every available command
 ```
 
-The `show` view opens with a **live loading spinner** while it renders, then two
-declutter controls in the sidebar: *show related concepts* (reveal the dimmed
-umbrella nodes) and a *min link strength* slider (hide one-off links).
+The `show` view opens with a live loading spinner, then two declutter controls:
+*show related concepts* (reveal dimmed umbrella nodes) and a *min link strength*
+slider (hide one-off links).
 
-### OpenAI Codex
-
-Install the project-local Codex hooks with:
+### Add a concept the agent missed
 
 ```bash
-python -m learnlance install --codex
-```
-
-Codex's native `apply_patch` edits are captured through `PostToolUse` and
-analyzed at `Stop`. After installing, review/trust the hook in Codex with
-`/hooks`. Use `--in-chat` if you want Codex to analyze its own work.
-
-### Command Code
-
-Install the project-local Command Code hooks with:
-
-```bash
-python -m learnlance install --commandcode
-```
-
-Command Code's `write_file` and `edit_file` tools are captured through
-`PostToolUse` and analyzed at `Stop`. Use `--in-chat` to have Command Code
-analyze its own work.
-
-When you run any `learnlance` command in a project, it automatically detects
-active agent environments and installs missing project hooks. This also works
-when you move to a new project after the first setup; no separate setup command
-is required.
-
-The zero-configuration path is:
-
-```bash
-pip install learnlance-univ
-learnlance config
-```
-
-If no external LLM CLI is configured, supported agents are automatically set up
-to analyze in-chat. If an LLM CLI is already available, LearnLance uses it as
-the analysis backend instead.
-
-### Try the UX demo
-
-Open `examples/ux_demo.html` in a browser, then ask Codex to improve its toast
-notification UX or accessibility. The edit will exercise LearnLance's Codex
-hook without changing the package itself.
-
-### Add a concept Claude missed
-
-```bash
-learnlance add "debouncing"                 # searches the current dir for the topic
+learnlance add "debouncing"                 # search the current dir for the topic
 learnlance add "topological sort" --path ./src
-learnlance add "event sourcing" --force     # add even if it's not found in the code
+learnlance add "event sourcing" --force     # add even if it's not in the code
 ```
-
-learnlance greps your codebase for the topic, sends the matching snippets to
-Claude, and adds the concept (and any tightly-related ones actually present)
-just like the hook does.
 
 ### Clear the graph
 
 ```bash
-learnlance clear "delta encoding"   # remove one concept (and any orphaned related nodes)
-learnlance clear                    # wipe the entire graph (asks first; -y to skip)
+learnlance clear "delta encoding"   # remove one concept (+ orphaned related nodes)
+learnlance clear                    # wipe the graph (asks first; -y to skip)
 ```
 
-Per-session markdown recaps are written to `~/.learnlance/insights/<session>.md`.
+Per-session recaps are written to `~/.learnlance/insights/<session>.md`.
 
 ## Configuration
 
 ```bash
-learnlance config                      # show current settings
-learnlance config --cli-model haiku    # make the cli backend use a faster model
-learnlance config --max-topics 3       # fewer concepts per turn
-learnlance config --background off      # run inline (blocks until analysis is done)
-learnlance config --disable             # pause without uninstalling the hook
-learnlance config --backend api --set-key sk-ant-...   # switch to the API backend
+learnlance config                            # show current settings
+learnlance config --llm-cmd "ollama run llama3"   # use any CLI that reads stdin
+learnlance config --cli-model haiku          # model alias for the CLI backend
+learnlance config --max-topics 3             # fewer concepts per turn
+learnlance config --background off           # run analysis inline (blocks)
+learnlance config --disable                  # pause without uninstalling hooks
+learnlance config --enable                   # re-enable
 ```
 
-Everything lives under `~/.learnlance/`:
-`graph.json` (the graph), `graph.html` (the visualization), `insights/`
-(markdown recaps), `learnlance.log` (diagnostics).
+Everything lives under `~/.learnlance/`: `graph.json` (the graph), `graph.html`
+(the visualization), `insights/` (recaps), `learnlance.log` (diagnostics).
 
 ## Uninstall
 
 ```bash
-python -m learnlance uninstall
+learnlance uninstall                 # Claude Code (default)
+learnlance uninstall --commandcode   # one specific agent
 ```
 
-## How it works (internals)
+## How it works
+
+learnlance normalizes every agent's hook payload into one `CodeEvent`, then runs
+a harness-blind pipeline: insights → knowledge graph → HTML → recap. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
 | File | Role |
 |------|------|
-| `hook.py` | Stop-hook entry; spawns the detached worker |
-| `transcript.py` | Parses Claude Code's JSONL transcript for generated code |
-| `insights.py` | Generates insights — via the `claude` CLI (default) or the API |
-| `codesearch.py` | Finds where a topic lives in your code (powers `add`) |
-| `graph.py` | Merges concepts into the persistent knowledge graph |
+| `adapters.py` | Translates each agent's hook payload into a `CodeEvent` |
+| `install.py` | Writes each agent's hook config (per project) |
+| `autosetup.py` | Detects your agents and installs missing hooks |
+| `hook.py` | Hook entrypoint; spawns the detached worker |
+| `core.py` | The harness-blind learning pipeline |
+| `insights.py` | Generates insights via an LLM CLI (or in-chat) |
+| `transcript.py` | Parses Claude Code's JSONL transcript |
+| `pending.py` | Buffers mid-session edits from tool-at-a-time agents |
+| `graph.py` | Merges concepts into the knowledge graph |
 | `viz.py` | Renders the offline, self-contained HTML graph |
-| `spinner.py` | The animated terminal loading indicator |
-| `install.py` | Wires the hook into `~/.claude/settings.json` |
-| `adapters.py` | Translates each agent's hook payload, including Codex patches |
+| `codesearch.py` | Finds where a topic lives in your code (`add`) |
 
-Zero third-party dependencies by design — the hook must run reliably wherever
-Claude Code launches it.
+Zero third-party dependencies by design — hooks must run reliably wherever an
+agent launches them.
 
 ## Contributing
 
-LearnLance is actively looking for contributors.
+LearnLance is actively looking for contributors. You don't need to understand the
+entire codebase to contribute.
 
-You don't need to understand the entire codebase to contribute.
+### Areas to help
 
-### Areas where you can help
-
-- Claude Code integration
-- OpenAI Codex integration
-- Other coding-agent integrations
+- A coding-agent integration (adapter + installer)
 - Knowledge graph algorithms
 - Concept extraction
 - Graph visualization
-- CLI/UX improvements
+- CLI/UX
 - Testing
 - Documentation
 - New learning workflows
@@ -186,7 +180,11 @@ You don't need to understand the entire codebase to contribute.
 - Improve graph visualization
 - Add tests for transcript parsing
 - Improve Windows compatibility
-- Add new CLI commands
+- Add a CLI command
 - Improve concept deduplication
-- Improve accessibility of the graph
-- Add documentation/examples
+- Improve graph accessibility
+- Add documentation or examples
+
+## License
+
+MIT — see [LICENSE](LICENSE).
