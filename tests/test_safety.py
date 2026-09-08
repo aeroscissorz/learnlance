@@ -17,6 +17,16 @@ import pytest
 
 from learnlance import autosetup, cli, config, install
 
+
+def test_windows_hook_command_uses_powershell_call_operator(monkeypatch):
+    """Quoted Windows executables need `&` when Copilot invokes PowerShell."""
+    monkeypatch.setattr(install.os, "name", "nt")
+    monkeypatch.setattr(install.shutil, "which",
+                        lambda name: r"C:\workspaces\outbound test\venv\Scripts\learnlance.EXE")
+
+    assert install.hook_command() == (
+        r'& "C:\workspaces\outbound test\venv\Scripts\learnlance.EXE" hook')
+
 USER_SETTINGS = {
     "model": "opus",
     "permissions": {"allow": ["Bash(ls:*)"]},

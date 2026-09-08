@@ -121,11 +121,18 @@ def hook_command() -> str:
     """
     exe = shutil.which("learnlance")
     if exe:
-        return f'"{exe}" hook'
+        # VS Code/Copilot runs command hooks through PowerShell on Windows.
+        # PowerShell needs the call operator when an executable path is quoted;
+        # without it, a path containing spaces is parsed as a string followed by
+        # an unexpected token (for example: `"...\\learnlance.EXE" hook`).
+        prefix = "& " if os.name == "nt" else ""
+        return f'{prefix}"{exe}" hook'
     launcher = Path(__file__).resolve().parent.parent / "learnlance_hook.py"
     if launcher.exists():
-        return f'"{sys.executable}" "{launcher}"'
-    return f'"{sys.executable}" -m learnlance hook'
+        prefix = "& " if os.name == "nt" else ""
+        return f'{prefix}"{sys.executable}" "{launcher}"'
+    prefix = "& " if os.name == "nt" else ""
+    return f'{prefix}"{sys.executable}" -m learnlance hook'
 
 
 def _load_settings(p: Path) -> dict:
