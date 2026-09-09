@@ -88,6 +88,14 @@ Check what's actually installed and firing:
 learnlance doctor
 ```
 
+## Getting Started
+
+New to LearnLance?
+
+Follow the [Getting Started Guide](docs/getting-started.md) for a
+step-by-step walkthrough from installation and setup to your first
+knowledge graph.
+
 ### Install one agent by hand
 
 `learnlance install` with no flags is the same as `learnlance setup` — it detects
