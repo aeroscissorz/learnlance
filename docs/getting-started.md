@@ -20,7 +20,17 @@ Before you begin, make sure you have:
     
 -   A supported AI coding agent
 
-LearnLance supports integrations including Claude Code, OpenAI Codex, Cursor, GitHub Copilot, Gemini CLI and others. 
+LearnLance supports the following integrations:
+
+- Claude Code
+- OpenAI Codex
+- Cursor
+- GitHub Copilot (CLI / cloud / VS Code)
+- Command Code
+- Kiro
+- Gemini CLI
+- Antigravity
+- Git (post-commit fallback)
 
 Not sure which Python version you're running? Check with:
 
