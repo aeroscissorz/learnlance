@@ -6,13 +6,13 @@ The rule, stated as a test rather than a comment:
     They must not contain LearnLance's analysis logic.
 """
 from __future__ import annotations
-
+import json
 import ast
 from pathlib import Path
 
 import pytest
-
-from learnlance import adapters, pending
+from learnlance.install import install_windsurf_hook , uninstall_windsurf_hook
+from learnlance import adapters, pending 
 from conftest import BUFFERED, CODE, capture_payload, end_payload
 
 
@@ -267,3 +267,42 @@ def test_codex_ignores_bash_and_stop_without_edits(cfg, project, home):
            "cwd": str(project)}
     finished = adapters.detect(end).to_event(end, {}, cfg)
     assert finished.skip_reason == "no code edits captured this session"
+
+
+def test_windsurf_adapter_buffers_and_drains(tmp_path):
+    adapter = adapters.WindsurfAdapter()
+    
+    # 1. Simulate PostToolUse event
+    tool_payload = {
+        "event": "PostToolUse",
+        "tool_name": "write_file",
+        "tool_input": {"path": "main.py", "content": "print('hello')"},
+        "session_id": "test-session-123",
+        "cwd": str(tmp_path),
+    }
+    event = adapter.to_event(tool_payload, state={}, cfg={})
+    assert event is None or event.skip_reason is not None  # buffered, not yet sent to analysis
+
+    # 2. Simulate Stop event
+    stop_payload = {
+        "event": "Stop",
+        "session_id": "test-session-123",
+        "cwd": str(tmp_path),
+    }
+    final_event = adapter.to_event(stop_payload, state={}, cfg={})
+    assert final_event is not None
+    assert final_event.source == "windsurf"
+    assert len(final_event.files) > 0
+
+
+def test_install_windsurf_hook(tmp_path):
+    out = install_windsurf_hook(str(tmp_path))
+    hook_file = tmp_path / ".windsurf" / "hooks" / "learnlance.json"
+    assert hook_file.exists()
+    
+    data = json.loads(hook_file.read_text(encoding="utf-8"))
+    assert data["version"] == "v1"
+    assert len(data["hooks"]) >= 2
+    
+    uninstall_out = uninstall_windsurf_hook(str(tmp_path))
+    assert not hook_file.exists()
