@@ -147,12 +147,13 @@ def test_remove_node_cleans_file_index():
     assert g["file_index"] == {}
 
 
-def test_viz_hides_weak_links_by_default(home, tmp_path):
+def test_viz_hides_weak_links_and_controls(home, tmp_path):
     out = tmp_path / "graph.html"
     viz.render_html(graph.empty(), out)
     html = out.read_text(encoding="utf-8")
-    assert "minWeight:2" in html
-    assert 'value="2"' in html
+    assert "(e.weight||1) >= 2" in html
+    assert "showRelated" not in html
+    assert "min link strength" not in html
 
 
 def test_candidate_nodes_scores_by_shared_tag_and_name():

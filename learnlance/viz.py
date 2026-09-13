@@ -65,11 +65,6 @@ _TEMPLATE = r"""<!doctype html>
   .stat span{color:var(--muted);font-size:11px}
   input[type=search]{width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--line);
     background:var(--panel2);color:var(--fg);margin-bottom:12px;font-size:13px}
-  .controls{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
-    padding:10px 12px;margin-bottom:14px;display:flex;flex-direction:column;gap:8px}
-  .controls label{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px}
-  .controls input[type=range]{flex:1;accent-color:var(--accent)}
-  .controls .val{color:var(--fg);min-width:12px;text-align:right}
   .legend{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
   .legend span{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px}
   .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
@@ -113,13 +108,6 @@ _TEMPLATE = r"""<!doctype html>
         <div><b id="s-turns">0</b><span>TURNS</span></div>
       </div>
       <input type="search" id="q" placeholder="Search concepts…" autocomplete="off">
-      <div class="controls">
-        <label><input type="checkbox" id="showRelated"> show related concepts (dimmed)</label>
-        <label>min link strength
-          <input type="range" id="minW" min="1" max="6" step="1" value="2">
-          <span class="val" id="minWv">2</span>
-        </label>
-      </div>
       <div class="legend" id="legend"></div>
       <div id="detail"><span class="empty">Click any concept to see what it is and where you met it.</span></div>
     </div>
@@ -142,7 +130,6 @@ const CATCOLORS = {
 const color = c => CATCOLORS[c] || CATCOLORS.other;
 
 let DATA, rawNodes, rawEdges;
-const filters = { showRelated:false, minWeight:2 };
 
 const svg = document.getElementById('svg');
 const NS="http://www.w3.org/2000/svg";
@@ -213,7 +200,7 @@ function switchProject(slug){
 function buildData(){
   idIndex={};
   const visible = Object.values(rawNodes)
-    .filter(n => filters.showRelated || !n.placeholder);
+    .filter(n => !n.placeholder);
   nodes = visible.map(n => {
     const p = posMemo[n.id];
     return {...n,
@@ -222,7 +209,7 @@ function buildData(){
   });
   nodes.forEach(n=>idIndex[n.id]=n);
   links = rawEdges
-    .filter(e => (e.weight||1) >= filters.minWeight)
+    .filter(e => (e.weight||1) >= 2)
     .filter(e => idIndex[e.source] && idIndex[e.target])
     .map(e => ({source:idIndex[e.source], target:idIndex[e.target],
                 type:e.type, weight:e.weight||1, tags:e.tags||[], why:e.why||''}));
@@ -377,16 +364,6 @@ function applySearch(){
   });
 }
 document.getElementById('q').addEventListener('input', applySearch);
-
-// ---- controls ----
-document.getElementById('showRelated').addEventListener('change',(e)=>{
-  filters.showRelated = e.target.checked; rebuild();
-});
-document.getElementById('minW').addEventListener('input',(e)=>{
-  filters.minWeight = +e.target.value;
-  document.getElementById('minWv').textContent = e.target.value;
-  rebuild();
-});
 
 // ---- init ----
 function init(){
