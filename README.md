@@ -31,7 +31,7 @@ can actually understand and remember.
 
 ## Demo
 
-![Learnlance knowledge graph](docs/demo.png)
+![Learnlance knowledge graph](https://github.com/aeroscissorz/learnlance/blob/main/docs/demo.png)
 
 This is what learnlance builds — an interactive map of the concepts you've
 picked up while coding.
