@@ -31,9 +31,10 @@ can actually understand and remember.
 
 ## Demo
 
-<!-- Drop in a real GIF or video of the graph being generated, e.g.:
-     ![Learnlance demo](docs/demo.gif)
--->
+[**Open the interactive demo**](examples/demo.html) — a self-contained HTML
+graph generated from a real learnlance session. Download and open it in any
+browser (no server needed), then drag nodes and click a concept to see its
+explanation and where it came from.
 
 learnlance watches your agent — **Claude Code, OpenAI Codex, Cursor, GitHub
 Copilot (CLI / cloud / VS Code), Command Code, Kiro, Gemini CLI, Antigravity**,
