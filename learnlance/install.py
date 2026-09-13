@@ -23,6 +23,7 @@ import functools
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -109,7 +110,7 @@ def settings_path() -> Path:
     return Path.home() / ".claude" / "settings.json"
 
 
-def hook_command() -> str:
+def hook_command(*, posix: bool = False) -> str:
     """Build the command Claude Code runs on Stop, correct for how learnlance
     was installed. All variants contain 'learnlance' so uninstall stays idempotent.
 
@@ -121,8 +122,12 @@ def hook_command() -> str:
          absolute path (survives PATH differences in the hook's environment).
       3. Fallback -> `python -m learnlance hook` with the current interpreter.
     """
+    # Git invokes hooks with sh on every platform. Other Windows integrations
+    # retain their PowerShell command syntax, including the call operator.
     launcher = Path(__file__).resolve().parent.parent / "learnlance_hook.py"
     if launcher.exists():
+        if posix:
+            return shlex.join([sys.executable, str(launcher)])
         prefix = "& " if os.name == "nt" else ""
         return f'{prefix}"{sys.executable}" "{launcher}"'
     exe = shutil.which("learnlance")
@@ -131,8 +136,12 @@ def hook_command() -> str:
         # PowerShell needs the call operator when an executable path is quoted;
         # without it, a path containing spaces is parsed as a string followed by
         # an unexpected token (for example: `"...\\learnlance.EXE" hook`).
+        if posix:
+            return shlex.join([exe, "hook"])
         prefix = "& " if os.name == "nt" else ""
         return f'{prefix}"{exe}" hook'
+    if posix:
+        return shlex.join([sys.executable, "-m", "learnlance", "hook"])
     prefix = "& " if os.name == "nt" else ""
     return f'{prefix}"{sys.executable}" -m learnlance hook'
 
@@ -251,7 +260,7 @@ def _git_hook_body() -> str:
         f"# {GIT_MARK}\n"
         'CWD="$(git rev-parse --show-toplevel)"\n'
         'COMMIT="$(git rev-parse HEAD)"\n'
-        f"printf '{{\"source\":\"git\",\"cwd\":\"%s\",\"commit\":\"%s\"}}' \"$CWD\" \"$COMMIT\" | {hook_command()}\n"
+        f"printf '{{\"source\":\"git\",\"cwd\":\"%s\",\"commit\":\"%s\"}}' \"$CWD\" \"$COMMIT\" | {hook_command(posix=True)}\n"
     )
 
 
