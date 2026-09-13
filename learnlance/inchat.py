@@ -97,6 +97,7 @@ with this shape:
       "level": "beginner|intermediate|advanced",
       "explanation": "2-4 sentences a newcomer could understand",
       "why_here": "one sentence: how it showed up in THIS change",
+      "files": ["app/delta.py"],
       "tags": ["compression", "diffing"],
       "related": ["Data synchronization", "Diffing algorithms"]
     }}
@@ -108,6 +109,8 @@ Rules:
 - Name transferable, googleable concepts ("idempotency keys", "topological sort"),
   not vague labels and not a description of this codebase.
 - Only concepts genuinely present in what you just wrote. Skip boilerplate.
+- "files": the specific file path(s) where this concept appears, exactly as
+  written in the code (omit or use [] when it spans the whole change).
 - "tags": 2-5 short lowercase kebab-case themes. Reuse the same wording for the
   same theme every time — tags are what link concepts together in the graph.
 - "related": 2-4 adjacent concepts, including one broader umbrella concept.

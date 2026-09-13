@@ -52,6 +52,7 @@ SCHEMA_HINT = """Return JSON in exactly this shape:
       "level": "beginner|intermediate|advanced",
       "explanation": "2-4 sentences a newcomer can understand",
       "why_here": "one sentence: how it showed up in THIS change",
+      "files": ["app/delta.py"],
       "tags": ["compression", "diffing", "data-sync"],
       "related": ["Data synchronization", "Diffing algorithms"]
     }
@@ -64,6 +65,8 @@ Rules:
   language, framework, or UI unless this change uses that specific technique.
 - Use `why_here` to name the exact code token, API, file, or behavior that proves
   the topic is present. If you cannot point to evidence, omit the topic.
+- "files": the specific file path(s) in the change where this concept appears,
+  exactly as written in the code (omit or use [] when it spans the whole change).
 - "tags": 2-5 SHORT lowercase kebab-case connective keywords (broad themes this
   concept belongs to, e.g. "concurrency", "caching", "http", "state-management").
   Reuse the SAME tag wording for the same theme every time so concepts across
@@ -247,6 +250,75 @@ def generate(cfg: dict, code_blob: str) -> dict:
     """Extract learnable insights from code. Returns {"did": str, "topics": [...]}."""
     result = _extract_json(_run_cli(cfg, _build_prompt(cfg, code_blob)))
     return _finalize(result, cfg, code_blob)
+
+
+def _build_link_prompt(topics: list[dict], candidates: dict[str, list[dict]]) -> str:
+    """Build the prompt for the candidate-ranking linking step."""
+    lines = [
+        "You are maintaining a personal knowledge graph. A coding session just "
+        "produced the concepts below, and each one has a SHORT list of existing "
+        "concepts that might be related. Decide which pairs genuinely relate and "
+        "should be linked.",
+        "",
+        "Rules:",
+        "- Only link a concept to one of ITS OWN listed candidates.",
+        "- Prefer quality over quantity; include a link only when the relationship "
+        "is meaningful and specific, not merely that both share a broad theme.",
+        "- Give each accepted link a short `why` clause.",
+        "",
+        "Return JSON in exactly this shape:",
+        '{"links": [{"topic": "Delta encoding", "target": "Data compression", "why": "delta encoding is a form of data compression"}]}',
+        'If nothing genuinely relates, return {"links": []}.',
+        "",
+        "Concepts and their candidates:",
+    ]
+    for t in topics:
+        name = (t.get("name") or "").strip()
+        if not name:
+            continue
+        lines.append(f"- {name}: {(t.get('explanation') or '').strip()[:200]}")
+        for c in candidates.get(name, []):
+            lines.append(
+                f"    candidate: {c['name']} ({c.get('category', '')}) — "
+                f"{(c.get('explanation') or '').strip()[:160]}"
+            )
+    return "\n".join(lines)
+
+
+def link_candidates(cfg: dict, topics: list[dict],
+                    candidates: dict[str, list[dict]]) -> list[dict]:
+    """Ask the LLM to pick real relationships from a bounded candidate list.
+
+    Returns ``[{"a": node_id, "b": node_id, "why": str}]`` for accepted links.
+    Any failure returns ``[]`` so rule-based linking still runs as a fallback.
+    """
+    if not topics or not candidates:
+        return []
+    try:
+        text = _run_cli(cfg, _build_link_prompt(topics, candidates))
+        data = _extract_json(text)
+    except Exception:
+        return []
+
+    from . import graph
+
+    topic_id = {t.get("name", "").strip().lower(): graph.slug(t.get("name", ""))
+                for t in topics}
+    target_id: dict[str, str] = {}
+    for cands in candidates.values():
+        for c in cands:
+            target_id[c["name"].lower()] = c["id"]
+
+    links: list[dict] = []
+    for link in data.get("links", []) or []:
+        if not isinstance(link, dict):
+            continue
+        a = topic_id.get((link.get("topic") or "").strip().lower())
+        b = target_id.get((link.get("target") or "").strip().lower())
+        why = (link.get("why") or "").strip()
+        if a and b and a != b:
+            links.append({"a": a, "b": b, "why": why})
+    return links
 
 
 # --------------------------------------------------------------------------- #

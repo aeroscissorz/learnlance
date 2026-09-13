@@ -116,8 +116,8 @@ _TEMPLATE = r"""<!doctype html>
       <div class="controls">
         <label><input type="checkbox" id="showRelated"> show related concepts (dimmed)</label>
         <label>min link strength
-          <input type="range" id="minW" min="1" max="6" step="1" value="1">
-          <span class="val" id="minWv">1</span>
+          <input type="range" id="minW" min="1" max="6" step="1" value="2">
+          <span class="val" id="minWv">2</span>
         </label>
       </div>
       <div class="legend" id="legend"></div>
@@ -142,7 +142,7 @@ const CATCOLORS = {
 const color = c => CATCOLORS[c] || CATCOLORS.other;
 
 let DATA, rawNodes, rawEdges;
-const filters = { showRelated:false, minWeight:1 };
+const filters = { showRelated:false, minWeight:2 };
 
 const svg = document.getElementById('svg');
 const NS="http://www.w3.org/2000/svg";
@@ -225,7 +225,7 @@ function buildData(){
     .filter(e => (e.weight||1) >= filters.minWeight)
     .filter(e => idIndex[e.source] && idIndex[e.target])
     .map(e => ({source:idIndex[e.source], target:idIndex[e.target],
-                type:e.type, weight:e.weight||1, tags:e.tags||[]}));
+                type:e.type, weight:e.weight||1, tags:e.tags||[], why:e.why||''}));
 }
 
 function buildEls(){
@@ -236,7 +236,7 @@ function buildEls(){
     el.setAttribute('stroke-width', (1 + Math.min(l.weight||1,6)*0.35).toFixed(2));
     el.setAttribute('stroke-opacity', l.type==='shared-tag' ? 0.55 : 0.8);
     const title=document.createElementNS(NS,'title');
-    title.textContent = l.type + (l.tags&&l.tags.length?(' · '+l.tags.join(', ')):'') + ' x'+(l.weight||1);
+    title.textContent = l.type + (l.why?(' · '+l.why):'') + (l.tags&&l.tags.length?(' · '+l.tags.join(', ')):'') + ' x'+(l.weight||1);
     el.appendChild(title);
     gLinks.appendChild(el); return el;
   });
@@ -350,6 +350,12 @@ function showDetail(n){
     `<div class="ex"><b>${esc(e.did||'')}</b><br>${esc(e.why_here||'')}`+
     (e.files&&e.files.length?`<br><span style="opacity:.7">${esc(e.files.join(', '))}</span>`:'')+`</div>`).join('');
   const tags=(n.tags||[]).map(t=>`<span class="chip">#${esc(t)}</span>`).join('');
+  const where=Object.entries(n.sources||{})
+    .sort((a,b)=>(b[1].count||0)-(a[1].count||0))
+    .map(([f,s])=>`<div class="ex"><b>${esc(f)}</b><br><span style="opacity:.7">used ${s.count||0}x</span></div>`).join('');
+  const whys=Object.entries(n.whys||{})
+    .sort((a,b)=>(b[1].count||0)-(a[1].count||0))
+    .map(([w,s])=>`<div class="ex"><b>why</b><br>${esc(w)}</div>`).join('');
   const conns=links.filter(l=>l.source===n||l.target===n).length;
   document.getElementById('detail').innerHTML =
     `<h2>${esc(n.name)}</h2>`+
@@ -357,6 +363,8 @@ function showDetail(n){
     `<span class="tag">seen ${n.count||0}x</span>`+`<span class="tag">${conns} links</span>`+
     `<p>${esc(n.explanation)||'<span class="empty">A related concept — no explanation captured yet.</span>'}</p>`+
     (tags?`<div class="chips">${tags}</div>`:'')+
+    where+
+    whys+
     ex;
   nodes.forEach(m=>m._c.setAttribute('stroke','#0b0d12'));
   n._c.setAttribute('stroke','#fff'); n._c.setAttribute('stroke-width',2.5);

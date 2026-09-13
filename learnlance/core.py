@@ -36,7 +36,7 @@ def process_event(cfg: dict, event: CodeEvent | None) -> None:
             return
 
         result = insights.generate(cfg, event.blob)
-        merge_result(cfg, event, result)
+        merge_result(cfg, event, result, link_candidates=True)
     except Exception as e:  # never surface a failure to the user's session
         config.log(f"[{_now()}] ERROR in process_event: {e!r}")
 
@@ -59,7 +59,7 @@ def _say(msg: str) -> None:
 
 
 def merge_result(cfg: dict, event: CodeEvent, result: dict,
-                 announce: bool = True) -> bool:
+                 announce: bool = True, link_candidates: bool = False) -> bool:
     """Merge an insights dict into the project's graph. Returns True if anything
     landed.
 
@@ -83,9 +83,23 @@ def merge_result(cfg: dict, event: CodeEvent, result: dict,
     config.register_project(cwd)
 
     g = graph.load_project(cwd)
+
+    # Cheap retrieval -> agent ranking. Only the CLI path opts in (link_candidates
+    # defaults False for in-chat, which already had the agent answer the prompt).
+    semantic_links = []
+    if link_candidates and insights.resolve_backend(cfg):
+        candidates = {}
+        for t in result["topics"]:
+            found = graph.candidate_nodes(g, t)
+            if found:
+                candidates[(t.get("name") or "").strip()] = found
+        semantic_links = insights.link_candidates(cfg, result["topics"], candidates)
+
     new_names = graph.update(g, result, {
         "when": _now(), "session": event.session,
         "cwd": cwd, "files": event.files,
+        "goal": (event.user_prompt or "")[:500],
+        "semantic_links": semantic_links,
     })
     graph.save_project(g, cwd)
     viz.render_project_html(g, cwd)
