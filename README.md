@@ -31,10 +31,12 @@ can actually understand and remember.
 
 ## Demo
 
-[**Open the interactive demo**](examples/demo.html) — a self-contained HTML
-graph generated from a real learnlance session. Download and open it in any
-browser (no server needed), then drag nodes and click a concept to see its
-explanation and where it came from.
+[![Learnlance knowledge graph demo](docs/demo.png)](examples/demo.html)
+
+This is what learnlance builds — an interactive map of the concepts you've
+picked up while coding. [**Open the live demo**](examples/demo.html) (download
+and open in any browser, no server needed) to drag nodes, zoom, and click a
+concept to see its explanation and where it came from.
 
 learnlance watches your agent — **Claude Code, OpenAI Codex, Cursor, GitHub
 Copilot (CLI / cloud / VS Code), Command Code, Kiro, Gemini CLI, Antigravity**,
