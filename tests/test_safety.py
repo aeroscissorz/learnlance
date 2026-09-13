@@ -188,3 +188,43 @@ def test_git_hook_is_written_with_lf_endings(home, project):
     body = (hooks / "post-commit").read_bytes()
     assert b"\r\n" not in body, "CRLF makes the shebang '#!/bin/sh\\r'"
     assert body.startswith(b"#!/bin/sh\n")
+
+
+def test_git_hook_executes_source_launcher_through_git(home, project, monkeypatch):
+    """Git uses sh even on Windows; execute the hook, not just its shebang."""
+    if not shutil.which("git"):
+        pytest.skip("git unavailable")
+
+    # Exercise spaces, a shell variable, and an apostrophe without running a
+    # real agent or changing the developer's installed hooks/configuration.
+    tools_dir = project / "hook tools $HOME's"
+    (tools_dir / "learnlance").mkdir(parents=True)
+    launcher = tools_dir / "learnlance_hook.py"
+    launcher.write_text(
+        "import pathlib, sys\n"
+        "pathlib.Path(__file__).with_name('received.json').write_text(\n"
+        "    sys.stdin.read(), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(install, "__file__", str(tools_dir / "learnlance" / "install.py"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", install.os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-c", "core.hooksPath=.git/hooks", "-c", "commit.gpgSign=false",
+             "-c", "user.name=Hook Test", "-c", "user.email=hook@example.invalid", *args],
+            cwd=project, capture_output=True, text=True, timeout=20, check=True,
+        )
+
+    git("init", "-q")
+    git("config", "core.hooksPath", ".git/hooks")
+    install.install_git_hook(str(project))
+    committed = git("commit", "--allow-empty", "-m", "Exercise post-commit hook")
+
+    received = launcher.with_name("received.json")
+    assert received.exists(), committed.stdout + committed.stderr
+    payload = json.loads(received.read_text(encoding="utf-8"))
+    assert payload["source"] == "git"
+    assert install.Path(payload["cwd"]).resolve() == project.resolve()
+    assert payload["commit"] == git("rev-parse", "HEAD").stdout.strip()
