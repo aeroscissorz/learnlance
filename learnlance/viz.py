@@ -209,7 +209,6 @@ function buildData(){
   });
   nodes.forEach(n=>idIndex[n.id]=n);
   links = rawEdges
-    .filter(e => (e.weight||1) >= 2)
     .filter(e => idIndex[e.source] && idIndex[e.target])
     .map(e => ({source:idIndex[e.source], target:idIndex[e.target],
                 type:e.type, weight:e.weight||1, tags:e.tags||[], why:e.why||''}));

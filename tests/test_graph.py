@@ -147,11 +147,11 @@ def test_remove_node_cleans_file_index():
     assert g["file_index"] == {}
 
 
-def test_viz_hides_weak_links_and_controls(home, tmp_path):
+def test_viz_removes_link_controls(home, tmp_path):
     out = tmp_path / "graph.html"
     viz.render_html(graph.empty(), out)
     html = out.read_text(encoding="utf-8")
-    assert "(e.weight||1) >= 2" in html
+    assert "(e.weight||1) >= 2" not in html
     assert "showRelated" not in html
     assert "min link strength" not in html
 
