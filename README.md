@@ -1,33 +1,24 @@
 # learnlance 🧠🔍
 
-Turn what AI coding agents build into a growing personal knowledge graph.
+### AI writes your code. LearnLance helps you learn from it.
+
+LearnLance watches your AI coding agent, extracts the concepts
+behind the code it writes, and builds a personal knowledge graph
+of what you've learned while coding.
 
 [Demo](#demo) · [Install](#install) · [Contribute](#contributing)
 
-```
-┌───────────────────────────────────────────────┐
-│                                               │
-│                YOUR LEARNING GRAPH            │
-│                                               │
-│    Delta encoding ──── Data synchronization   │
-│          │                   │                │
-│          └─── Compression ────┘                │
-│                  │                            │
-│                  └──────── Diffing            │
-│                                               │
-│    Debouncing ───── Idempotency keys          │
-│                                               │
-│    Topological sort ─── Graph algorithms      │
-│                                               │
-└───────────────────────────────────────────────┘
-```
+## Why?
 
-You use AI to write code.
+AI coding agents can make you dramatically faster.
 
-Learnlance watches what gets built and turns that work into concepts you
-can actually understand and remember.
+But there's a problem:
 
-**AI writes the code. Learnlance helps you learn from it.**
+You can ship code you don't fully understand.
+
+LearnLance turns your coding-agent sessions into a learning
+system — so the code your agent writes becomes something you
+actually understand and remember.
 
 ## Demo
 
