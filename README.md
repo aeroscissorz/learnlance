@@ -1,4 +1,8 @@
-# learnlance 🧠🔍
+<p align="center">
+  <img src="assets/logo.svg" width="200" alt="learnlance logo">
+</p>
+
+<h1 align="center">learnlance 🧠🔍</h1>
 
 ### AI writes your code. LearnLance helps you learn from it.
 

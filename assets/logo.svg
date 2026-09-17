@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="learnlance logo">
+  <rect x="6" y="6" width="228" height="228" rx="26" fill="#000000" stroke="#ffffff" stroke-width="8"/>
+  <path d="M110 62 C90 44 62 28 34 30 C58 50 76 62 90 78 Z" fill="#ffffff"/>
+  <path d="M92 112 C92 72 116 56 148 56 C182 56 202 78 202 108 L202 120 C202 132 186 136 172 136 L122 136 C104 136 92 126 92 114 Z" fill="#ffffff"/>
+  <rect x="110" y="132" width="86" height="74" rx="16" fill="#ffffff"/>
+  <circle cx="136" cy="164" r="13" fill="none" stroke="#000000" stroke-width="4"/>
+  <circle cx="172" cy="164" r="13" fill="none" stroke="#000000" stroke-width="4"/>
+  <line x1="149" y1="164" x2="159" y2="164" stroke="#000000" stroke-width="4"/>
+  <circle cx="138" cy="164" r="3.5" fill="#000000"/>
+  <circle cx="170" cy="164" r="3.5" fill="#000000"/>
+  <path d="M142 192 Q154 186 166 192" fill="none" stroke="#000000" stroke-width="4" stroke-linecap="round"/>
+  <path d="M149 194 L159 194 L154 210 Z" fill="#000000"/>
+  <path d="M104 240 L104 214 C104 204 136 202 154 202 C172 202 204 204 204 214 L204 240 Z" fill="#ffffff"/>
+  <rect x="58" y="212" width="176" height="18" rx="5" fill="#ffffff" stroke="#000000" stroke-width="3"/>
+  <path d="M58 221 L36 221 L58 206 L58 236 Z" fill="#ffffff" stroke="#000000" stroke-width="3"/>
+  <path d="M36 221 L46 221 L46 215 L36 221 Z" fill="#000000"/>
+</svg>
