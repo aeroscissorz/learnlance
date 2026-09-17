@@ -48,3 +48,6 @@ Thumbs.db
 
 # Command Code agent's own project config (taste, etc.) — not part of this repo.
 .commandcode/
+
+# brag video generation output (kept local; demo assets are copied into docs/)
+brag-output/
