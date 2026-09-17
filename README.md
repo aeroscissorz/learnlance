@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/learnlance%20logo.png" width="200" alt="learnlance logo">
+  <img src="assets/logonew.png" width="200" alt="learnlance logo">
 </p>
 
 <h1 align="center">learnlance 🧠🔍</h1>
